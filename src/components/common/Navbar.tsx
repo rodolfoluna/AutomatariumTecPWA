@@ -8,25 +8,30 @@
  */
 
 import React, { useState, useEffect } from 'react'
-import { UserRole } from '../../types/academic'
 import { 
   RefreshCw, 
   Download, 
   Info, 
   GraduationCap, 
-  User 
+  User,
+  LogOut
 } from 'lucide-react'
+import { UserRole, UserProfile } from '../../types/academic'
 
 interface NavbarProps {
+  currentUser?: UserProfile | null
   currentRole: UserRole
   onRoleChange: (role: UserRole) => void
+  onLogout?: () => void
   onOpenAbout: () => void
   pendingSyncCount?: number
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
+  currentUser,
   currentRole,
   onRoleChange,
+  onLogout,
   onOpenAbout,
   pendingSyncCount = 0
 }) => {
@@ -189,6 +194,45 @@ export const Navbar: React.FC<NavbarProps> = ({
             <User size={13} /> Alumno
           </button>
         </div>
+
+        {/* Usuario Activo */}
+        {currentUser && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '4px 10px',
+            background: '#222222',
+            borderRadius: 'var(--radius-sm)',
+            border: '1px solid #383838',
+            fontSize: '0.775rem'
+          }}>
+            {currentUser.role === 'teacher' ? (
+              <GraduationCap size={14} color="var(--primary)" />
+            ) : (
+              <User size={14} color="var(--primary)" />
+            )}
+            <span style={{ fontWeight: 600 }}>{currentUser.fullName}</span>
+            {currentUser.controlNumber && (
+              <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
+                [{currentUser.controlNumber}]
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Botón Cerrar Sesión */}
+        {onLogout && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={onLogout}
+            title="Cerrar sesión activa"
+            style={{ padding: '4px 8px', fontSize: '0.75rem', color: '#F87171' }}
+          >
+            <LogOut size={13} /> Salir
+          </button>
+        )}
 
         <button
           type="button"

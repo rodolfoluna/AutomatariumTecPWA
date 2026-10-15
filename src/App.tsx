@@ -5,13 +5,21 @@
  */
 
 import React, { useState } from 'react'
-import { UserRole, StudentGroup, Activity, ActivitySubmission } from './types/academic'
+import { UserRole, StudentGroup, Activity, ActivitySubmission, UserProfile } from './types/academic'
 import { Navbar } from './components/common/Navbar'
 import { AboutModal } from './components/common/AboutModal'
 import { TeacherDashboard } from './components/teacher/TeacherDashboard'
 import { StudentView } from './components/student/StudentView'
+import { LoginView } from './components/auth/LoginView'
+import { getStoredSession, logoutSession, updateStudentPassword } from './services/authService'
 import { initSyncService } from './services/syncService'
 import { localDB } from './db/indexedDb'
+
+const ALL_STUDENTS = [
+  { controlNumber: '21280145', fullName: 'García Hernández Juan' },
+  { controlNumber: '21280999', fullName: 'Sánchez Morales Carlos' },
+  { controlNumber: '21280147', fullName: 'López Ruiz Ana' }
+]
 
 // Datos iniciales demostrativos (con actividad individual y actividad en equipo)
 const INITIAL_GROUPS: StudentGroup[] = [
@@ -184,16 +192,68 @@ const INITIAL_SUBMISSIONS: ActivitySubmission[] = [
 ]
 
 export const App: React.FC = () => {
-  const [currentRole, setCurrentRole] = useState<UserRole>('student')
+  // Sesión de usuario activo (por defecto carga sesión almacenada o Juan García)
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
+    return getStoredSession() || {
+      uid: 'student_21280145',
+      email: '21280145@tec.edu.mx',
+      role: 'student',
+      fullName: 'García Hernández Juan',
+      controlNumber: '21280145',
+      mustChangePassword: false,
+      createdAt: Date.now()
+    }
+  })
+
   const [isAboutOpen, setIsAboutOpen] = useState(false)
   const [groups, setGroups] = useState<StudentGroup[]>(INITIAL_GROUPS)
   const [activities, setActivities] = useState<Activity[]>(INITIAL_ACTIVITIES)
   const [submissions, setSubmissions] = useState<ActivitySubmission[]>(INITIAL_SUBMISSIONS)
 
-  // Alumno actual
-  const [studentControlNumber] = useState('21280145')
-  const [studentFullName] = useState('García Hernández Juan')
-  const [mustChangePassword, setMustChangePassword] = useState(false)
+  // Rol sincronizado con el usuario activo
+  const currentRole = currentUser?.role || 'student'
+
+  const handleRoleChange = (newRole: UserRole) => {
+    if (newRole === 'teacher') {
+      const teacherProfile: UserProfile = {
+        uid: 'prof_mendoza',
+        email: 'prof_mendoza@tec.mx',
+        role: 'teacher',
+        fullName: 'Prof. Mendoza Morales',
+        createdAt: Date.now()
+      }
+      setCurrentUser(teacherProfile)
+      localStorage.setItem('automatarium_tec_session', JSON.stringify(teacherProfile))
+    } else {
+      const studentProfile: UserProfile = {
+        uid: 'student_21280145',
+        email: '21280145@tec.edu.mx',
+        role: 'student',
+        fullName: 'García Hernández Juan',
+        controlNumber: '21280145',
+        mustChangePassword: false,
+        createdAt: Date.now()
+      }
+      setCurrentUser(studentProfile)
+      localStorage.setItem('automatarium_tec_session', JSON.stringify(studentProfile))
+    }
+  }
+
+  const handleLoginSuccess = (user: UserProfile) => {
+    setCurrentUser(user)
+  }
+
+  const handleLogout = async () => {
+    await logoutSession()
+    setCurrentUser(null)
+  }
+
+  const handlePasswordChanged = async (newPassword: string) => {
+    if (currentUser?.controlNumber) {
+      await updateStudentPassword(currentUser.controlNumber, newPassword)
+      setCurrentUser(prev => prev ? { ...prev, mustChangePassword: false } : null)
+    }
+  }
 
   // Inicializar servicio de sincronización en segundo plano
   React.useEffect(() => {
@@ -256,12 +316,31 @@ export const App: React.FC = () => {
     localDB.cachedSubmissions.put(updated).catch(() => {})
   }
 
+  // Si no hay sesión iniciada, mostrar la pantalla de Login oficial
+  if (!currentUser) {
+    return (
+      <>
+        <LoginView
+          groups={groups}
+          onLoginSuccess={handleLoginSuccess}
+          onOpenAbout={() => setIsAboutOpen(true)}
+        />
+        <AboutModal
+          isOpen={isAboutOpen}
+          onClose={() => setIsAboutOpen(false)}
+        />
+      </>
+    )
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-main)' }}>
       {/* Barra de navegación global estilo Automatarium */}
       <Navbar
+        currentUser={currentUser}
         currentRole={currentRole}
-        onRoleChange={setCurrentRole}
+        onRoleChange={handleRoleChange}
+        onLogout={handleLogout}
         onOpenAbout={() => setIsAboutOpen(true)}
         pendingSyncCount={submissions.filter(s => s.isDirtyLocally).length}
       />
@@ -280,11 +359,12 @@ export const App: React.FC = () => {
           />
         ) : (
           <StudentView
-            studentControlNumber={studentControlNumber}
-            studentFullName={studentFullName}
-            mustChangePassword={mustChangePassword}
+            studentControlNumber={currentUser.controlNumber || '21280145'}
+            studentFullName={currentUser.fullName}
+            mustChangePassword={currentUser.mustChangePassword}
             activities={activities}
-            onPasswordChanged={() => setMustChangePassword(false)}
+            classmates={ALL_STUDENTS}
+            onPasswordChanged={handlePasswordChanged}
             onSubmissionComplete={handleSubmissionComplete}
           />
         )}

@@ -7,11 +7,12 @@
  */
 
 import React, { useState, useEffect } from 'react'
-import { Activity, Exercise, ActivitySubmission, ExerciseSubmission, AFDExercise, LexerExercise } from '../../types/academic'
+import { Activity, Exercise, ActivitySubmission, ExerciseSubmission, AFDExercise, LexerExercise, StudentTeam, TeamInvitation } from '../../types/academic'
 import { AutomataGraph } from '../../types/automata'
 import { GraphCanvas } from '../canvas/GraphCanvas'
 import { AFDSimulatorPanel } from '../simulation/AFDSimulatorPanel'
 import { LexerSimulatorPanel } from '../simulation/LexerSimulatorPanel'
+import { TeamLobby } from './TeamLobby'
 import { runAFDTestSuite } from '../../simulation/afdSimulator'
 import { runLexerTestSuite } from '../../simulation/lexerSimulator'
 import { localDB } from '../../db/indexedDb'
@@ -24,8 +25,10 @@ import {
   UserPlus, 
   Clock, 
   ChevronLeft, 
-  ChevronRight,
-  BookOpen
+  ChevronRight, 
+  BookOpen,
+  User,
+  RotateCcw
 } from 'lucide-react'
 
 interface StudentViewProps {
@@ -33,6 +36,7 @@ interface StudentViewProps {
   studentFullName: string
   mustChangePassword?: boolean
   activities: Activity[]
+  classmates?: Array<{ controlNumber: string; fullName: string }>
   onPasswordChanged: (newPassword: string) => void
   onSubmissionComplete: (submission: ActivitySubmission) => void
 }
@@ -42,6 +46,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
   studentFullName,
   mustChangePassword = false,
   activities,
+  classmates = [],
   onPasswordChanged,
   onSubmissionComplete
 }) => {
@@ -55,19 +60,24 @@ export const StudentView: React.FC<StudentViewProps> = ({
   const selectedActivity = activities.find(a => a.id === selectedActivityId) || activities[0] || null
   const [selectedExerciseIndex, setSelectedExerciseIndex] = useState(0)
 
-  // Estado del equipo (para actividades colaborativas)
-  const [teamMembers, setTeamMembers] = useState<Array<{ controlNumber: string; fullName: string }>>([
-    { controlNumber: studentControlNumber, fullName: studentFullName },
-    { controlNumber: '21280999', fullName: 'Sánchez Morales Carlos' }
-  ])
-  const [showTeamModal, setShowTeamModal] = useState(false)
-  const [partnerControlNum, setPartnerControlNum] = useState('')
-  const [partnerFullName, setPartnerFullName] = useState('')
+  // Estado dinámico del equipo para la actividad seleccionada
+  const [currentTeam, setCurrentTeam] = useState<StudentTeam | null>(null)
+  const [invitationsReceived, setInvitationsReceived] = useState<TeamInvitation[]>([])
+  const [invitationsSent, setInvitationsSent] = useState<TeamInvitation[]>([])
+  const [isSoloMode, setIsSoloMode] = useState<boolean>(false)
   const [lastEditedByInfo, setLastEditedByInfo] = useState<string>('Tú (Guardado local)')
 
+  const isTeamActivity = selectedActivity?.isTeamActivity || false
+  const isStarted = !isTeamActivity || isSoloMode || (currentTeam !== null && currentTeam.isLocked)
+  const effectiveTeamMembers = isSoloMode
+    ? [{ controlNumber: studentControlNumber, fullName: studentFullName }]
+    : currentTeam?.members || [{ controlNumber: studentControlNumber, fullName: studentFullName }]
+  const isTeam = isTeamActivity && !isSoloMode
+  const teamId = isTeam
+    ? (currentTeam?.id || `team_${selectedActivity?.id}_${effectiveTeamMembers.map(m => m.controlNumber).sort().join('_')}`)
+    : undefined
+
   const currentExercise: Exercise | undefined = selectedActivity?.exercises[selectedExerciseIndex]
-  const isTeam = selectedActivity?.isTeamActivity || false
-  const teamId = isTeam ? `team_${selectedActivity?.id}_${teamMembers.map(m => m.controlNumber).sort().join('_')}` : undefined
 
   const [currentGraph, setCurrentGraph] = useState<AutomataGraph>(() => {
     return {
@@ -85,6 +95,33 @@ export const StudentView: React.FC<StudentViewProps> = ({
 
   const [activeSimulationState, setActiveSimulationState] = useState<number | null>(null)
   const [saveStatusMessage, setSaveStatusMessage] = useState<string | null>(null)
+
+  // Cargar equipo e invitaciones al cambiar de actividad o alumno
+  useEffect(() => {
+    if (!selectedActivity) return
+
+    const loadTeamData = async () => {
+      const soloKey = `solo_${selectedActivity.id}_${studentControlNumber}`
+      const isSolo = localStorage.getItem(soloKey) === 'true'
+      setIsSoloMode(isSolo)
+
+      try {
+        const allTeams = await localDB.teams.where('activityId').equals(selectedActivity.id).toArray()
+        const myTeam = allTeams.find(t => t.members.some(m => m.controlNumber === studentControlNumber)) || null
+        setCurrentTeam(myTeam)
+
+        const allInvs = await localDB.invitations.where('activityId').equals(selectedActivity.id).toArray()
+        const received = allInvs.filter(i => i.toControlNumber === studentControlNumber && i.status === 'pending')
+        const sent = allInvs.filter(i => i.fromControlNumber === studentControlNumber && i.status === 'pending')
+        setInvitationsReceived(received)
+        setInvitationsSent(sent)
+      } catch (e) {
+        console.warn('Error loading team data:', e)
+      }
+    }
+
+    loadTeamData()
+  }, [selectedActivity?.id, studentControlNumber])
 
   // Cargar borrador de IndexedDB al cambiar de ejercicio o actividad
   useEffect(() => {
@@ -222,8 +259,8 @@ export const StudentView: React.FC<StudentViewProps> = ({
       isDirtyLocally: !navigator.onLine,
       isTeamSubmission: isTeam,
       teamId: isTeam ? teamId : undefined,
-      teamName: isTeam ? `Equipo: ${teamMembers.map(m => m.fullName.split(' ')[0]).join(' & ')}` : undefined,
-      teamMembers: isTeam ? teamMembers : undefined,
+      teamName: isTeam ? `Equipo: ${effectiveTeamMembers.map(m => m.fullName.split(' ')[0]).join(' & ')}` : undefined,
+      teamMembers: isTeam ? effectiveTeamMembers : undefined,
       lastEditedBy: {
         controlNumber: studentControlNumber,
         fullName: studentFullName,
@@ -247,19 +284,90 @@ export const StudentView: React.FC<StudentViewProps> = ({
     setSaveStatusMessage(isTeam ? '¡Actividad entregada para todo el equipo!' : '¡Actividad entregada con éxito!')
   }
 
-  const handleAddPartner = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!partnerControlNum.trim() || !partnerFullName.trim()) return
+  // Manejo de invitaciones de equipo
+  const handleSendInvitation = async (toControlNumber: string, toFullName: string) => {
+    if (!selectedActivity) return
+    const teamIdToUse = currentTeam?.id || `team_${selectedActivity.id}_${studentControlNumber}_${Date.now()}`
 
-    if (!teamMembers.some(m => m.controlNumber === partnerControlNum.trim())) {
-      setTeamMembers([...teamMembers, {
-        controlNumber: partnerControlNum.trim(),
-        fullName: partnerFullName.trim()
-      }])
+    let team = currentTeam
+    if (!team) {
+      team = {
+        id: teamIdToUse,
+        activityId: selectedActivity.id,
+        members: [{ controlNumber: studentControlNumber, fullName: studentFullName }],
+        maxTeamSize: selectedActivity.maxTeamSize || 2,
+        isLocked: false,
+        createdAt: Date.now()
+      }
+      await localDB.teams.put(team)
+      setCurrentTeam(team)
     }
-    setPartnerControlNum('')
-    setPartnerFullName('')
-    setShowTeamModal(false)
+
+    const invitation: TeamInvitation = {
+      id: `inv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      activityId: selectedActivity.id,
+      fromControlNumber: studentControlNumber,
+      fromFullName: studentFullName,
+      toControlNumber,
+      toFullName,
+      teamId: team.id,
+      status: 'pending',
+      createdAt: Date.now()
+    }
+
+    await localDB.invitations.put(invitation)
+    setInvitationsSent(prev => [...prev, invitation])
+  }
+
+  const handleAcceptInvitation = async (invitation: TeamInvitation) => {
+    if (!selectedActivity) return
+
+    await localDB.invitations.update(invitation.id, { status: 'accepted' })
+
+    let team = await localDB.teams.get(invitation.teamId)
+    if (!team) {
+      team = {
+        id: invitation.teamId,
+        activityId: selectedActivity.id,
+        members: [
+          { controlNumber: invitation.fromControlNumber, fullName: invitation.fromFullName },
+          { controlNumber: studentControlNumber, fullName: studentFullName }
+        ],
+        maxTeamSize: selectedActivity.maxTeamSize || 2,
+        isLocked: false,
+        createdAt: Date.now()
+      }
+    } else {
+      if (!team.members.some(m => m.controlNumber === studentControlNumber)) {
+        team.members.push({ controlNumber: studentControlNumber, fullName: studentFullName })
+      }
+    }
+
+    await localDB.teams.put(team)
+    setCurrentTeam(team)
+    setInvitationsReceived(prev => prev.filter(i => i.id !== invitation.id))
+  }
+
+  const handleRejectInvitation = async (invitationId: string) => {
+    await localDB.invitations.update(invitationId, { status: 'rejected' })
+    setInvitationsReceived(prev => prev.filter(i => i.id !== invitationId))
+  }
+
+  const handleCancelInvitation = async (invitationId: string) => {
+    await localDB.invitations.delete(invitationId)
+    setInvitationsSent(prev => prev.filter(i => i.id !== invitationId))
+  }
+
+  const handleStartWithTeam = async (team: StudentTeam) => {
+    const lockedTeam: StudentTeam = { ...team, isLocked: true }
+    await localDB.teams.put(lockedTeam)
+    setCurrentTeam(lockedTeam)
+  }
+
+  const handleStartSolo = () => {
+    if (!selectedActivity) return
+    localStorage.setItem(`solo_${selectedActivity.id}_${studentControlNumber}`, 'true')
+    setIsSoloMode(true)
   }
 
   const handleChangePasswordSubmit = (e: React.FormEvent) => {
@@ -319,30 +427,51 @@ export const StudentView: React.FC<StudentViewProps> = ({
             </select>
           </div>
 
-          {/* Banner de Equipo si aplica */}
-          {isTeam && (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '3px 10px',
-              background: 'hsl(270, 50%, 15%)',
-              border: '1px solid hsl(270, 60%, 35%)',
-              borderRadius: 'var(--radius-sm)'
-            }}>
-              <Users size={13} color="#D8B4FE" />
-              <span style={{ fontSize: '0.75rem', color: '#E9D5FF', fontWeight: 500 }}>
-                Equipo: {teamMembers.map(m => m.fullName.split(' ')[0]).join(' & ')}
-              </span>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ padding: '1px 6px', fontSize: '0.675rem' }}
-                onClick={() => setShowTeamModal(true)}
-              >
-                <UserPlus size={11} /> Miembros
-              </button>
-            </div>
+          {/* Banner de Equipo o Individual si la actividad es en equipo */}
+          {isTeamActivity && (
+            isSoloMode ? (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '3px 10px',
+                background: '#2B2418',
+                border: '1px solid #78481A',
+                borderRadius: 'var(--radius-sm)'
+              }}>
+                <User size={13} color="var(--primary)" />
+                <span style={{ fontSize: '0.75rem', color: 'hsl(var(--primary-h), 85%, 93%)', fontWeight: 500 }}>
+                  Modalidad Individual
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ padding: '1px 6px', fontSize: '0.675rem' }}
+                  onClick={() => {
+                    localStorage.removeItem(`solo_${selectedActivity?.id}_${studentControlNumber}`)
+                    setIsSoloMode(false)
+                  }}
+                  title="Cambiar a conformación de equipo"
+                >
+                  <Users size={11} /> Unirse a Equipo
+                </button>
+              </div>
+            ) : isTeam && currentTeam && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '3px 10px',
+                background: 'hsl(270, 50%, 15%)',
+                border: '1px solid hsl(270, 60%, 35%)',
+                borderRadius: 'var(--radius-sm)'
+              }}>
+                <Users size={13} color="#D8B4FE" />
+                <span style={{ fontSize: '0.75rem', color: '#E9D5FF', fontWeight: 500 }}>
+                  Equipo: {effectiveTeamMembers.map(m => m.fullName.split(' ')[0]).join(' & ')}
+                </span>
+              </div>
+            )
           )}
         </div>
 
@@ -374,171 +503,143 @@ export const StudentView: React.FC<StudentViewProps> = ({
         </div>
       </div>
 
-      {/* 2. BARRA DE NAVEGACIÓN ENTRE EJERCICIOS (ANTERIOR / PESTAÑAS / SIGUIENTE) */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '6px 18px',
-        background: '#181818',
-        borderBottom: '1px solid #2B2B2B'
-      }}>
-        {/* Botones de navegación Anterior / Siguiente */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={selectedExerciseIndex === 0}
-            onClick={() => handleNavigateToExercise(selectedExerciseIndex - 1)}
-            style={{ padding: '3px 8px', fontSize: '0.75rem' }}
-            title="Ir al ejercicio anterior (guarda borrador automáticamente)"
-          >
-            <ChevronLeft size={14} /> Anterior
-          </button>
-
-          {/* Pestañas de todos los ejercicios de la actividad */}
-          <div style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
-            {selectedActivity?.exercises.map((ex, idx) => {
-              const isCurrent = selectedExerciseIndex === idx
-              return (
-                <button
-                  key={ex.id}
-                  type="button"
-                  className={`btn btn-sm ${isCurrent ? 'btn-primary' : 'btn-secondary'}`}
-                  style={{ fontSize: '0.75rem', padding: '3px 10px', display: 'flex', alignItems: 'center', gap: 6 }}
-                  onClick={() => handleNavigateToExercise(idx)}
-                >
-                  <span style={{ fontWeight: 600 }}>{idx + 1}.</span>
-                  <span>{ex.type === 'LEXER_DIAGRAM' ? 'Diagrama Léxico' : 'AFD'}</span>
-                  {isCurrent && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#111' }} />}
-                </button>
-              )
-            })}
-          </div>
-
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={selectedExerciseIndex >= totalExercises - 1}
-            onClick={() => handleNavigateToExercise(selectedExerciseIndex + 1)}
-            style={{ padding: '3px 8px', fontSize: '0.75rem' }}
-            title="Ir al siguiente ejercicio (guarda borrador automáticamente)"
-          >
-            Siguiente <ChevronRight size={14} />
-          </button>
-        </div>
-
-        {/* Info de posición y sincronización */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-            Ejercicio {selectedExerciseIndex + 1} de {totalExercises}
-          </span>
-
-          {isTeam && (
-            <span style={{ fontSize: '0.725rem', color: 'var(--text-subtle)', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Clock size={12} /> {lastEditedByInfo}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* 3. ÁREA DE TRABAJO: LIENZO (65%) + SIMULADOR / PRUEBAS (35%) */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 410px', overflow: 'hidden' }}>
-        <div style={{ height: '100%', position: 'relative' }}>
-          <GraphCanvas
-            graph={currentGraph}
-            onChange={setCurrentGraph}
-            activeStateId={activeSimulationState}
+      {/* 2. CUERPO PRINCIPAL: LOBBY DE CONFORMACIÓN DE EQUIPO O ÁREA DE TRABAJO */}
+      {isTeamActivity && !isStarted && selectedActivity ? (
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          <TeamLobby
+            activity={selectedActivity}
+            currentStudent={{ controlNumber: studentControlNumber, fullName: studentFullName }}
+            classmates={classmates}
+            currentTeam={currentTeam}
+            invitationsReceived={invitationsReceived}
+            invitationsSent={invitationsSent}
+            onSendInvitation={handleSendInvitation}
+            onAcceptInvitation={handleAcceptInvitation}
+            onRejectInvitation={handleRejectInvitation}
+            onCancelInvitation={handleCancelInvitation}
+            onStartWithTeam={handleStartWithTeam}
+            onStartSolo={handleStartSolo}
           />
         </div>
+      ) : (
+        <>
+          {/* 2. BARRA DE NAVEGACIÓN ENTRE EJERCICIOS (ANTERIOR / PESTAÑAS / SIGUIENTE) */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '6px 18px',
+            background: '#181818',
+            borderBottom: '1px solid #2B2B2B'
+          }}>
+            {/* Botones de navegación Anterior / Siguiente */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={selectedExerciseIndex === 0}
+                onClick={() => handleNavigateToExercise(selectedExerciseIndex - 1)}
+                style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                title="Ir al ejercicio anterior (guarda borrador automáticamente)"
+              >
+                <ChevronLeft size={14} /> Anterior
+              </button>
 
-        <div style={{
-          borderLeft: '1px solid #333',
-          background: '#1A1A1A',
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100%',
-          overflowY: 'auto'
-        }}>
-          {currentExercise && (
-            <div style={{ padding: '14px 16px', borderBottom: '1px solid #2E2E2E', background: '#161616' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                <h4 style={{ fontSize: '0.9rem', fontWeight: 600, fontFamily: 'var(--font-header)' }}>{currentExercise.title}</h4>
-                <span className={`badge ${currentExercise.type === 'LEXER_DIAGRAM' ? 'badge-lexer' : 'badge-afd'}`}>
-                  {currentExercise.type === 'LEXER_DIAGRAM' ? 'Léxico' : 'AFD'}
+              {/* Pestañas de todos los ejercicios de la actividad */}
+              <div style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
+                {selectedActivity?.exercises.map((ex, idx) => {
+                  const isCurrent = selectedExerciseIndex === idx
+                  return (
+                    <button
+                      key={ex.id}
+                      type="button"
+                      className={`btn btn-sm ${isCurrent ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ fontSize: '0.75rem', padding: '3px 10px', display: 'flex', alignItems: 'center', gap: 6 }}
+                      onClick={() => handleNavigateToExercise(idx)}
+                    >
+                      <span style={{ fontWeight: 600 }}>{idx + 1}.</span>
+                      <span>{ex.type === 'LEXER_DIAGRAM' ? 'Diagrama Léxico' : 'AFD'}</span>
+                      {isCurrent && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#111' }} />}
+                    </button>
+                  )
+                })}
+              </div>
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={selectedExerciseIndex >= totalExercises - 1}
+                onClick={() => handleNavigateToExercise(selectedExerciseIndex + 1)}
+                style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                title="Ir al siguiente ejercicio (guarda borrador automáticamente)"
+              >
+                Siguiente <ChevronRight size={14} />
+              </button>
+            </div>
+
+            {/* Info de posición y sincronización */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                Ejercicio {selectedExerciseIndex + 1} de {totalExercises}
+              </span>
+
+              {isTeam && (
+                <span style={{ fontSize: '0.725rem', color: 'var(--text-subtle)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Clock size={12} /> {lastEditedByInfo}
                 </span>
-              </div>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-                {currentExercise.instructions}
-              </p>
+              )}
             </div>
-          )}
-
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            {currentExercise?.type === 'LEXER_DIAGRAM' ? (
-              <LexerSimulatorPanel
-                graph={currentGraph}
-                testCases={currentExercise.testCases}
-              />
-            ) : (
-              <AFDSimulatorPanel
-                graph={currentGraph}
-                testCases={currentExercise ? (currentExercise as any).testCases : []}
-                onStepChange={setActiveSimulationState}
-              />
-            )}
           </div>
-        </div>
-      </div>
 
-      {/* Modal: Integrantes del Equipo */}
-      {showTeamModal && (
-        <div className="modal-overlay" onClick={() => setShowTeamModal(false)}>
-          <div className="modal-content" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <Users size={20} color="var(--primary)" />
-              <h3 style={{ fontSize: '1.15rem', fontFamily: 'var(--font-header)' }}>Integrantes del Equipo</h3>
+          {/* 3. ÁREA DE TRABAJO: LIENZO (65%) + SIMULADOR / PRUEBAS (35%) */}
+          <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 410px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', position: 'relative' }}>
+              <GraphCanvas
+                graph={currentGraph}
+                onChange={setCurrentGraph}
+                activeStateId={activeSimulationState}
+              />
             </div>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>
-              Los siguientes alumnos comparten el mismo avance y entrega para esta práctica:
-            </p>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
-              {teamMembers.map((m, i) => (
-                <div key={i} style={{ padding: '8px 12px', background: '#1B1B1B', borderRadius: 'var(--radius-sm)', border: '1px solid #333', display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{m.fullName}</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{m.controlNumber}</span>
+            <div style={{
+              borderLeft: '1px solid #333',
+              background: '#1A1A1A',
+              display: 'flex',
+              flexDirection: 'column',
+              height: '100%',
+              overflowY: 'auto'
+            }}>
+              {currentExercise && (
+                <div style={{ padding: '14px 16px', borderBottom: '1px solid #2E2E2E', background: '#161616' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <h4 style={{ fontSize: '0.9rem', fontWeight: 600, fontFamily: 'var(--font-header)' }}>{currentExercise.title}</h4>
+                    <span className={`badge ${currentExercise.type === 'LEXER_DIAGRAM' ? 'badge-lexer' : 'badge-afd'}`}>
+                      {currentExercise.type === 'LEXER_DIAGRAM' ? 'Léxico' : 'AFD'}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
+                    {currentExercise.instructions}
+                  </p>
                 </div>
-              ))}
-            </div>
+              )}
 
-            <form onSubmit={handleAddPartner} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>Añadir Compañero por Número de Control:</div>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="No. Control (ej. 21280999)"
-                value={partnerControlNum}
-                onChange={(e) => setPartnerControlNum(e.target.value)}
-              />
-              <input
-                type="text"
-                className="form-input"
-                placeholder="Nombre del Compañero"
-                value={partnerFullName}
-                onChange={(e) => setPartnerFullName(e.target.value)}
-              />
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowTeamModal(false)}>
-                  Cerrar
-                </button>
-                <button type="submit" className="btn btn-primary btn-sm">
-                  Vincular al Equipo
-                </button>
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                {currentExercise?.type === 'LEXER_DIAGRAM' ? (
+                  <LexerSimulatorPanel
+                    graph={currentGraph}
+                    testCases={currentExercise.testCases}
+                  />
+                ) : (
+                  <AFDSimulatorPanel
+                    graph={currentGraph}
+                    testCases={currentExercise ? (currentExercise as any).testCases : []}
+                    onStepChange={setActiveSimulationState}
+                  />
+                )}
               </div>
-            </form>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* Modal Primer Login */}

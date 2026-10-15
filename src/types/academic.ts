@@ -117,3 +117,24 @@ export interface ActivitySubmission {
   grade?: number               // Calificación global asignada por el profesor (0-100)
   teacherFeedback?: string     // Retroalimentación docente global
 }
+
+export interface TeamInvitation {
+  id: string
+  activityId: string
+  fromControlNumber: string
+  fromFullName: string
+  toControlNumber: string
+  toFullName: string
+  teamId: string
+  status: 'pending' | 'accepted' | 'rejected'
+  createdAt: number
+}
+
+export interface StudentTeam {
+  id: string                   // team_${activityId}_${hash}
+  activityId: string
+  members: Array<{ controlNumber: string; fullName: string }>
+  maxTeamSize: number
+  isLocked: boolean            // true = equipo confirmado y actividad iniciada
+  createdAt: number
+}

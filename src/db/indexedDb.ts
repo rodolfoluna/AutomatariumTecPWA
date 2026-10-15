@@ -6,7 +6,7 @@
 
 import Dexie, { Table } from 'dexie'
 import { AutomataGraph } from '../types/automata'
-import { Activity, ActivitySubmission } from '../types/academic'
+import { Activity, ActivitySubmission, StudentTeam, TeamInvitation } from '../types/academic'
 
 export interface LocalDraft {
   id: string                   // `${activityId}_${exerciseId}` o `custom_${timestamp}`
@@ -20,7 +20,7 @@ export interface LocalDraft {
 
 export interface SyncQueueItem {
   id: string
-  action: 'SAVE_SUBMISSION' | 'SUBMIT_ACTIVITY' | 'CHANGE_PASSWORD'
+  action: 'SAVE_SUBMISSION' | 'SUBMIT_ACTIVITY' | 'CHANGE_PASSWORD' | 'SEND_INVITATION' | 'ACCEPT_INVITATION'
   payload: any
   createdAt: number
   status: 'pending' | 'syncing' | 'failed'
@@ -31,6 +31,8 @@ export class AutomatariumOfflineDatabase extends Dexie {
   drafts!: Table<LocalDraft, string>
   cachedActivities!: Table<Activity, string>
   cachedSubmissions!: Table<ActivitySubmission, string>
+  teams!: Table<StudentTeam, string>
+  invitations!: Table<TeamInvitation, string>
   syncQueue!: Table<SyncQueueItem, string>
 
   constructor() {
@@ -39,6 +41,8 @@ export class AutomatariumOfflineDatabase extends Dexie {
       drafts: 'id, exerciseId, activityId, projectType, updatedAt',
       cachedActivities: 'id, teacherId, published',
       cachedSubmissions: 'id, activityId, studentUid, controlNumber, overallStatus',
+      teams: 'id, activityId',
+      invitations: 'id, activityId, toControlNumber, fromControlNumber, status',
       syncQueue: 'id, action, status, createdAt'
     })
   }
