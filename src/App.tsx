@@ -120,6 +120,10 @@ export const App: React.FC = () => {
     })
   }
 
+  const handleDeleteActivity = (activityId: string) => {
+    setActivities(prev => prev.filter(a => a.id !== activityId))
+  }
+
   const handleSubmissionComplete = (submission: ActivitySubmission) => {
     setSubmissions(prev => {
       const idx = prev.findIndex(s => s.id === submission.id)
@@ -151,6 +155,7 @@ export const App: React.FC = () => {
             submissions={submissions}
             onSaveGroup={handleSaveGroup}
             onSaveActivity={handleSaveActivity}
+            onDeleteActivity={handleDeleteActivity}
           />
         ) : (
           <StudentView
