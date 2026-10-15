@@ -1,5 +1,6 @@
 /**
- * Barra de Navegación Superior:
+ * Barra de Navegación Superior con el Estilo Oficial de Automatarium:
+ * - Tipografía Space Mono y paleta carbón/naranja
  * - Indicador de Conectividad en tiempo real (En línea / Offline / Sincronizando)
  * - Selector de Rol (Docente / Alumno)
  * - Botón de Licencia y Atribución Automatarium
@@ -9,13 +10,11 @@
 import React, { useState, useEffect } from 'react'
 import { UserRole } from '../../types/academic'
 import { 
-  Wifi, 
-  WifiOff, 
   RefreshCw, 
   Download, 
   Info, 
   GraduationCap, 
-  Layers 
+  User 
 } from 'lucide-react'
 
 interface NavbarProps {
@@ -35,12 +34,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [isSyncing, setIsSyncing] = useState(false)
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
 
-  // Escuchar eventos de conectividad de red
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true)
       setIsSyncing(true)
-      // Simular sincronización al recuperar conexión
       setTimeout(() => {
         setIsSyncing(false)
       }, 1500)
@@ -54,7 +51,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
 
-    // Capturar evento de instalación PWA
     const handleBeforeInstall = (e: Event) => {
       e.preventDefault()
       setDeferredPrompt(e)
@@ -79,110 +75,101 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <nav style={{
-      height: '65px',
-      background: 'rgba(11, 15, 25, 0.95)',
-      backdropFilter: 'blur(12px)',
-      borderBottom: '1px solid var(--border)',
+      height: '60px',
+      background: '#181818',
+      borderBottom: '1px solid #333333',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '0 20px',
+      padding: '0 18px',
       position: 'sticky',
       top: 0,
       zIndex: 100
     }}>
-      {/* Logotipo y Título de la Aplicación */}
+      {/* Logotipo Estilo Automatarium */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{
-          width: 38,
-          height: 38,
-          borderRadius: 'var(--radius-md)',
-          background: 'linear-gradient(135deg, var(--primary) 0%, #06b6d4 100%)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: '0 4px 12px var(--primary-glow)'
-        }}>
-          <Layers size={22} color="#ffffff" />
-        </div>
+        {/* SVG Mini Logo de Automatarium (Tres círculos conectados) */}
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <circle cx="8" cy="16" r="6" fill="hsl(var(--primary-h), 84%, 50%)" />
+          <circle cx="24" cy="8" r="5" fill="none" stroke="hsl(var(--primary-h), 85%, 93%)" strokeWidth="2" />
+          <circle cx="24" cy="24" r="5" fill="none" stroke="hsl(var(--primary-h), 85%, 93%)" strokeWidth="2" />
+          <line x1="13" y1="13" x2="20" y2="10" stroke="hsl(var(--primary-h), 85%, 93%)" strokeWidth="2" />
+          <line x1="13" y1="19" x2="20" y2="22" stroke="hsl(var(--primary-h), 85%, 93%)" strokeWidth="2" />
+        </svg>
 
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontWeight: 700, fontSize: '1.1rem', letterSpacing: '-0.02em', color: '#f8fafc' }}>
-              Automatarium<span style={{ color: 'var(--accent-cyan)' }}>Tec</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontWeight: 700, fontSize: '1.15rem', fontFamily: 'var(--font-header)', letterSpacing: '-0.02em', color: 'var(--white)' }}>
+              automatarium<span style={{ color: 'var(--primary)' }}>.tec</span>
             </span>
-            <span className="badge badge-afd" style={{ fontSize: '0.65rem' }}>PWA</span>
-          </div>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>
-            AFDs & Analizadores Léxicos Offline
+            <span className="badge badge-afd" style={{ fontSize: '0.65rem', padding: '1px 5px' }}>PWA</span>
           </div>
         </div>
       </div>
 
-      {/* Centro: Semáforo e Indicador de Conexión / Sincronización */}
+      {/* Centro: Semáforo de Sincronización Offline */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
         gap: 8,
-        padding: '6px 14px',
-        background: 'rgba(0, 0, 0, 0.3)',
-        borderRadius: 'var(--radius-full)',
-        border: '1px solid var(--border)'
+        padding: '5px 12px',
+        background: '#111111',
+        borderRadius: 'var(--radius-sm)',
+        border: '1px solid #333'
       }}>
         {isSyncing ? (
           <>
-            <RefreshCw size={14} className="status-dot-syncing" color="var(--primary)" />
-            <span style={{ fontSize: '0.775rem', color: '#a5b4fc', fontWeight: 500 }}>
-              Sincronizando con el servidor...
+            <RefreshCw size={13} className="status-dot-syncing" color="var(--primary)" />
+            <span style={{ fontSize: '0.75rem', color: 'var(--primary)', fontFamily: 'var(--font-mono)' }}>
+              Sincronizando con servidor...
             </span>
           </>
         ) : isOnline ? (
           <>
             <span className="status-dot status-dot-online" />
-            <span style={{ fontSize: '0.775rem', color: '#6ee7b7', fontWeight: 500 }}>
+            <span style={{ fontSize: '0.75rem', color: '#86EFAC', fontFamily: 'var(--font-mono)' }}>
               En línea {pendingSyncCount > 0 ? `(${pendingSyncCount} pendientes)` : '(Sincronizado)'}
             </span>
           </>
         ) : (
           <>
             <span className="status-dot status-dot-offline" />
-            <span style={{ fontSize: '0.775rem', color: '#fcd34d', fontWeight: 500 }}>
-              Sin conexión (Modo Offline activo)
+            <span style={{ fontSize: '0.75rem', color: '#FDE047', fontFamily: 'var(--font-mono)' }}>
+              Modo Offline Activo
             </span>
           </>
         )}
       </div>
 
-      {/* Derecha: Cambiador de Rol, Botón Instalar y Acerca de */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      {/* Derecha: Selector de Rol y Licencia */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {deferredPrompt && (
           <button
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={handleInstallClick}
-            title="Instalar como aplicación de escritorio o móvil"
+            title="Instalar PWA"
           >
-            <Download size={14} /> Instalar PWA
+            <Download size={13} /> Instalar
           </button>
         )}
 
-        {/* Selector de Rol para demo / pruebas */}
+        {/* Conmutador de Rol para Pruebas */}
         <div style={{
           display: 'flex',
-          background: 'rgba(255, 255, 255, 0.05)',
-          padding: 3,
-          borderRadius: 'var(--radius-md)',
-          border: '1px solid var(--border)'
+          background: '#222222',
+          padding: 2,
+          borderRadius: 'var(--radius-sm)',
+          border: '1px solid #383838'
         }}>
           <button
             type="button"
             className={`btn btn-sm ${currentRole === 'teacher' ? 'btn-primary' : ''}`}
             style={{
-              padding: '4px 10px',
-              fontSize: '0.775rem',
+              padding: '3px 8px',
+              fontSize: '0.75rem',
               background: currentRole === 'teacher' ? undefined : 'transparent',
-              border: 'none',
-              boxShadow: currentRole === 'teacher' ? undefined : 'none'
+              border: 'none'
             }}
             onClick={() => onRoleChange('teacher')}
           >
@@ -192,26 +179,24 @@ export const Navbar: React.FC<NavbarProps> = ({
             type="button"
             className={`btn btn-sm ${currentRole === 'student' ? 'btn-primary' : ''}`}
             style={{
-              padding: '4px 10px',
-              fontSize: '0.775rem',
+              padding: '3px 8px',
+              fontSize: '0.75rem',
               background: currentRole === 'student' ? undefined : 'transparent',
-              border: 'none',
-              boxShadow: currentRole === 'student' ? undefined : 'none'
+              border: 'none'
             }}
             onClick={() => onRoleChange('student')}
           >
-            Alumno
+            <User size={13} /> Alumno
           </button>
         </div>
 
-        {/* Botón Acerca de / Licencia MIT */}
         <button
           type="button"
           className="btn btn-secondary btn-sm"
           onClick={onOpenAbout}
-          title="Ver Licencia MIT y Créditos a Automatarium"
+          title="Ver Licencia MIT"
         >
-          <Info size={14} /> Licencia
+          <Info size={13} /> Licencia
         </button>
       </div>
     </nav>

@@ -1,9 +1,8 @@
 /**
- * Vista de Trabajo del Alumno:
- * - Cambio forzoso de contraseña temporal en el primer login
- * - Resolución offline de actividades y ejercicios (AFD y Diagramas Léxicos)
- * - Lienzo interactivo + Simulador con autoevaluación
- * - Guardado de borradores offline en IndexedDB y cola de sincronización
+ * Vista de Trabajo del Alumno (Estilo Oficial Automatarium):
+ * - Soporte para Actividades Individuales o EN EQUIPO (avance compartido)
+ * - Cambio forzoso de contraseña en primer login
+ * - Guardado de borradores offline en IndexedDB y entrega unificada de equipo
  */
 
 import React, { useState, useEffect } from 'react'
@@ -17,10 +16,9 @@ import {
   Lock, 
   Save, 
   Send, 
-  WifiOff, 
+  Users, 
   CheckCircle2, 
-  ArrowLeft, 
-  FileCheck, 
+  UserPlus, 
   Clock 
 } from 'lucide-react'
 
@@ -41,25 +39,35 @@ export const StudentView: React.FC<StudentViewProps> = ({
   onPasswordChanged,
   onSubmissionComplete
 }) => {
-  // Modal de primer login
   const [showPasswordModal, setShowPasswordModal] = useState(mustChangePassword)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [passwordError, setPasswordError] = useState('')
 
-  // Estado de navegación en actividades y ejercicios
+  // Actividad seleccionada y ejercicio
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(activities[0] || null)
   const [selectedExerciseIndex, setSelectedExerciseIndex] = useState(0)
 
-  // Grafo del ejercicio actual
+  // Estado del equipo (para actividades en equipo)
+  const [teamMembers, setTeamMembers] = useState<Array<{ controlNumber: string; fullName: string }>>([
+    { controlNumber: studentControlNumber, fullName: studentFullName },
+    { controlNumber: '21280999', fullName: 'Sánchez Morales Carlos' }
+  ])
+  const [showTeamModal, setShowTeamModal] = useState(false)
+  const [partnerControlNum, setPartnerControlNum] = useState('')
+  const [partnerFullName, setPartnerFullName] = useState('')
+  const [lastEditedByInfo, setLastEditedByInfo] = useState<string>('Tú (Guardado local)')
+
   const currentExercise: Exercise | undefined = selectedActivity?.exercises[selectedExerciseIndex]
-  
+  const isTeam = selectedActivity?.isTeamActivity || false
+  const teamId = isTeam ? `team_${selectedActivity?.id}_${teamMembers.map(m => m.controlNumber).sort().join('_')}` : undefined
+
   const [currentGraph, setCurrentGraph] = useState<AutomataGraph>(() => {
     return {
       projectType: currentExercise?.type === 'LEXER_DIAGRAM' ? 'LEXER_DIAGRAM' : 'AFD',
       states: [
-        { id: 0, name: 'q0', x: 120, y: 160, isFinal: false },
-        { id: 1, name: 'q1', x: 260, y: 160, isFinal: true, token: 'TOKEN_ID' }
+        { id: 0, name: 'q0', x: 140, y: 160, isFinal: false },
+        { id: 1, name: 'q1', x: 300, y: 160, isFinal: true, token: 'TOKEN_ID' }
       ],
       transitions: [
         { id: 1, from: 0, to: 1, read: currentExercise?.type === 'LEXER_DIAGRAM' ? '[a-zA-Z]' : '0' }
@@ -71,23 +79,25 @@ export const StudentView: React.FC<StudentViewProps> = ({
   const [activeSimulationState, setActiveSimulationState] = useState<number | null>(null)
   const [saveStatusMessage, setSaveStatusMessage] = useState<string | null>(null)
 
-  // Cargar borrador local de IndexedDB al cambiar de ejercicio
+  // Cargar borrador de IndexedDB (considerando clave de equipo o alumno)
   useEffect(() => {
     if (!currentExercise || !selectedActivity) return
 
     const loadDraft = async () => {
-      const draftKey = `${selectedActivity.id}_${currentExercise.id}`
-      const existingDraft = await localDB.drafts.get(draftKey)
+      const storageKey = isTeam 
+        ? `${teamId}_${currentExercise.id}`
+        : `${selectedActivity.id}_${currentExercise.id}`
+      
+      const existingDraft = await localDB.drafts.get(storageKey)
 
       if (existingDraft) {
         setCurrentGraph(existingDraft.graph)
       } else {
-        // Inicializar plantilla base
         setCurrentGraph({
           projectType: currentExercise.type === 'LEXER_DIAGRAM' ? 'LEXER_DIAGRAM' : 'AFD',
           states: [
-            { id: 0, name: 'q0', x: 120, y: 160, isFinal: false },
-            { id: 1, name: 'q1', x: 280, y: 160, isFinal: true, token: currentExercise.type === 'LEXER_DIAGRAM' ? 'TOKEN_ID' : undefined }
+            { id: 0, name: 'q0', x: 140, y: 160, isFinal: false },
+            { id: 1, name: 'q1', x: 300, y: 160, isFinal: true, token: currentExercise.type === 'LEXER_DIAGRAM' ? 'TOKEN_ID' : undefined }
           ],
           transitions: [
             { id: 1, from: 0, to: 1, read: currentExercise.type === 'LEXER_DIAGRAM' ? '[a-zA-Z]' : '0' }
@@ -98,15 +108,17 @@ export const StudentView: React.FC<StudentViewProps> = ({
     }
 
     loadDraft()
-  }, [selectedActivity?.id, currentExercise?.id])
+  }, [selectedActivity?.id, currentExercise?.id, isTeam, teamId])
 
-  // Guardado en IndexedDB offline
   const handleSaveDraftOffline = async () => {
     if (!selectedActivity || !currentExercise) return
 
-    const draftKey = `${selectedActivity.id}_${currentExercise.id}`
+    const storageKey = isTeam 
+      ? `${teamId}_${currentExercise.id}`
+      : `${selectedActivity.id}_${currentExercise.id}`
+
     await localDB.drafts.put({
-      id: draftKey,
+      id: storageKey,
       activityId: selectedActivity.id,
       exerciseId: currentExercise.id,
       title: currentExercise.title,
@@ -115,19 +127,22 @@ export const StudentView: React.FC<StudentViewProps> = ({
       updatedAt: Date.now()
     })
 
-    setSaveStatusMessage('Borrador guardado en almacenamiento local (IndexedDB)')
+    setLastEditedByInfo(`Tú (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`)
+    setSaveStatusMessage(isTeam ? 'Borrador del equipo guardado localmente' : 'Borrador guardado localmente')
     setTimeout(() => setSaveStatusMessage(null), 3000)
   }
 
-  // Entregar la actividad
   const handleSubmitActivity = async () => {
     if (!selectedActivity || !currentExercise) return
 
-    // Guardar borrador actual
     await handleSaveDraftOffline()
 
+    const submissionId = isTeam && teamId
+      ? teamId
+      : `${selectedActivity.id}_${studentControlNumber}`
+
     const submission: ActivitySubmission = {
-      id: `${selectedActivity.id}_${studentControlNumber}`,
+      id: submissionId,
       activityId: selectedActivity.id,
       studentUid: `student_${studentControlNumber}`,
       controlNumber: studentControlNumber,
@@ -136,6 +151,16 @@ export const StudentView: React.FC<StudentViewProps> = ({
       overallStatus: 'submitted',
       submittedAt: Date.now(),
       isDirtyLocally: !navigator.onLine,
+      isTeamSubmission: isTeam,
+      teamId: isTeam ? teamId : undefined,
+      teamName: isTeam ? `Equipo: ${teamMembers.map(m => m.fullName.split(' ')[0]).join(' & ')}` : undefined,
+      teamMembers: isTeam ? teamMembers : undefined,
+      lastEditedBy: {
+        controlNumber: studentControlNumber,
+        fullName: studentFullName,
+        timestamp: Date.now()
+      },
+      version: 1,
       exerciseSubmissions: {
         [currentExercise.id]: {
           exerciseId: currentExercise.id,
@@ -148,10 +173,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
       }
     }
 
-    // Guardar en la base de datos offline local
     await localDB.cachedSubmissions.put(submission)
-
-    // Encolar acción de sincronización si está fuera de línea
     await localDB.syncQueue.put({
       id: `sync_${Date.now()}`,
       action: 'SUBMIT_ACTIVITY',
@@ -162,10 +184,24 @@ export const StudentView: React.FC<StudentViewProps> = ({
     })
 
     onSubmissionComplete(submission)
-    setSaveStatusMessage('¡Actividad entregada! Se sincronizará en cuanto tengas conexión.')
+    setSaveStatusMessage(isTeam ? '¡Actividad entregada para todo el equipo!' : '¡Actividad entregada con éxito!')
   }
 
-  // Manejar cambio de contraseña del primer login
+  const handleAddPartner = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!partnerControlNum.trim() || !partnerFullName.trim()) return
+
+    if (!teamMembers.some(m => m.controlNumber === partnerControlNum.trim())) {
+      setTeamMembers([...teamMembers, {
+        controlNumber: partnerControlNum.trim(),
+        fullName: partnerFullName.trim()
+      }])
+    }
+    setPartnerControlNum('')
+    setPartnerFullName('')
+    setShowTeamModal(false)
+  }
+
   const handleChangePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (newPassword.length < 6) {
@@ -182,36 +218,62 @@ export const StudentView: React.FC<StudentViewProps> = ({
   }
 
   return (
-    <div style={{ height: 'calc(100vh - 65px)', display: 'flex', flexDirection: 'column' }}>
-      {/* Barra de cabecera del estudiante */}
+    <div style={{ height: 'calc(100vh - 60px)', display: 'flex', flexDirection: 'column' }}>
+      {/* Barra Superior del Estudiante (Estilo Automatarium) */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: '10px 20px',
-        background: 'rgba(17, 24, 39, 0.95)',
-        borderBottom: '1px solid var(--border)'
+        padding: '8px 20px',
+        background: '#1F1F1F',
+        borderBottom: '1px solid #333'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div>
-            <span style={{ fontWeight: 600, fontSize: '0.95rem', color: '#f8fafc' }}>
+            <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--white)' }}>
               {studentFullName}
             </span>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 8, fontFamily: 'var(--font-mono)' }}>
-              (No. Control: {studentControlNumber})
+              [{studentControlNumber}]
             </span>
           </div>
 
           <span className="badge badge-afd" style={{ fontSize: '0.725rem' }}>
-            {selectedActivity?.title || 'Sin actividad seleccionada'}
+            {selectedActivity?.title}
           </span>
+
+          {/* Banner de Actividad en Equipo */}
+          {isTeam && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '4px 10px',
+              background: 'hsl(270, 50%, 15%)',
+              border: '1px solid hsl(270, 60%, 35%)',
+              borderRadius: 'var(--radius-sm)'
+            }}>
+              <Users size={14} color="#D8B4FE" />
+              <span style={{ fontSize: '0.75rem', color: '#E9D5FF', fontWeight: 500 }}>
+                Equipo ({teamMembers.length} alumnos): {teamMembers.map(m => m.fullName.split(' ')[0]).join(' & ')}
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ padding: '2px 6px', fontSize: '0.7rem' }}
+                onClick={() => setShowTeamModal(true)}
+              >
+                <UserPlus size={12} /> Integrantes
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Acciones de entrega y guardado */}
+        {/* Acciones de Guardado y Entrega */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {saveStatusMessage && (
-            <span style={{ fontSize: '0.8rem', color: '#6ee7b7', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <CheckCircle2 size={14} /> {saveStatusMessage}
+            <span style={{ fontSize: '0.775rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)' }}>
+              <CheckCircle2 size={13} /> {saveStatusMessage}
             </span>
           )}
 
@@ -220,44 +282,53 @@ export const StudentView: React.FC<StudentViewProps> = ({
             className="btn btn-secondary btn-sm"
             onClick={handleSaveDraftOffline}
           >
-            <Save size={14} /> Guardar Borrador Offline
+            <Save size={13} /> Guardar Borrador
           </button>
 
           <button
             type="button"
-            className="btn btn-success btn-sm"
+            className="btn btn-primary btn-sm"
             onClick={handleSubmitActivity}
           >
-            <Send size={14} /> Entregar Actividad
+            <Send size={13} /> {isTeam ? 'Entregar para el Equipo' : 'Entregar Actividad'}
           </button>
         </div>
       </div>
 
-      {/* Selector de Ejercicios de la Actividad */}
+      {/* Selector de Ejercicios */}
       {selectedActivity && selectedActivity.exercises.length > 1 && (
         <div style={{
           display: 'flex',
-          gap: 8,
-          padding: '8px 20px',
-          background: 'rgba(15, 23, 42, 0.8)',
-          borderBottom: '1px solid var(--border)'
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '6px 20px',
+          background: '#181818',
+          borderBottom: '1px solid #2B2B2B'
         }}>
-          {selectedActivity.exercises.map((ex, idx) => (
-            <button
-              key={ex.id}
-              type="button"
-              className={`btn btn-sm ${selectedExerciseIndex === idx ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setSelectedExerciseIndex(idx)}
-            >
-              Ejercicio {idx + 1}: {ex.type === 'LEXER_DIAGRAM' ? 'Diagrama Léxico' : 'AFD'}
-            </button>
-          ))}
+          <div style={{ display: 'flex', gap: 6 }}>
+            {selectedActivity.exercises.map((ex, idx) => (
+              <button
+                key={ex.id}
+                type="button"
+                className={`btn btn-sm ${selectedExerciseIndex === idx ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: '0.75rem', padding: '3px 10px' }}
+                onClick={() => setSelectedExerciseIndex(idx)}
+              >
+                {ex.type === 'LEXER_DIAGRAM' ? 'Diagrama Léxico' : 'AFD'} • Ejercicio {idx + 1}
+              </button>
+            ))}
+          </div>
+
+          {isTeam && (
+            <span style={{ fontSize: '0.725rem', color: 'var(--text-subtle)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Clock size={12} /> Última edición por: {lastEditedByInfo}
+            </span>
+          )}
         </div>
       )}
 
-      {/* Área Principal Dividida: Lienzo (65%) + Simulador y Pruebas (35%) */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 400px', overflow: 'hidden' }}>
-        {/* Lienzo Interactivo de Grafos */}
+      {/* Lienzo (65%) + Panel Simulador (35%) */}
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 410px', overflow: 'hidden' }}>
         <div style={{ height: '100%', position: 'relative' }}>
           <GraphCanvas
             graph={currentGraph}
@@ -266,31 +337,28 @@ export const StudentView: React.FC<StudentViewProps> = ({
           />
         </div>
 
-        {/* Panel Lateral: Instrucciones + Simulador */}
         <div style={{
-          borderLeft: '1px solid var(--border)',
-          background: 'var(--bg-elevated)',
+          borderLeft: '1px solid #333',
+          background: '#1A1A1A',
           display: 'flex',
           flexDirection: 'column',
           height: '100%',
           overflowY: 'auto'
         }}>
-          {/* Instrucciones del ejercicio */}
           {currentExercise && (
-            <div style={{ padding: '16px', borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,0.2)' }}>
+            <div style={{ padding: '14px 16px', borderBottom: '1px solid #2E2E2E', background: '#161616' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                <h4 style={{ fontSize: '0.95rem', fontWeight: 600 }}>{currentExercise.title}</h4>
+                <h4 style={{ fontSize: '0.9rem', fontWeight: 600, fontFamily: 'var(--font-header)' }}>{currentExercise.title}</h4>
                 <span className={`badge ${currentExercise.type === 'LEXER_DIAGRAM' ? 'badge-lexer' : 'badge-afd'}`}>
-                  {currentExercise.type === 'LEXER_DIAGRAM' ? 'Diagrama Léxico' : 'AFD'}
+                  {currentExercise.type === 'LEXER_DIAGRAM' ? 'Léxico' : 'AFD'}
                 </span>
               </div>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
                 {currentExercise.instructions}
               </p>
             </div>
           )}
 
-          {/* Panel de simulación específico según el tipo de ejercicio */}
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {currentExercise?.type === 'LEXER_DIAGRAM' ? (
               <LexerSimulatorPanel
@@ -308,17 +376,67 @@ export const StudentView: React.FC<StudentViewProps> = ({
         </div>
       </div>
 
-      {/* MODAL OBLIGATORIO: PRIMER LOGIN - CAMBIO DE CONTRASEÑA TEMPORAL */}
+      {/* Modal: Integrantes del Equipo */}
+      {showTeamModal && (
+        <div className="modal-overlay" onClick={() => setShowTeamModal(false)}>
+          <div className="modal-content" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <Users size={20} color="var(--primary)" />
+              <h3 style={{ fontSize: '1.15rem', fontFamily: 'var(--font-header)' }}>Integrantes del Equipo</h3>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>
+              Los siguientes alumnos compartirán el mismo diagrama y entrega para esta práctica:
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+              {teamMembers.map((m, i) => (
+                <div key={i} style={{ padding: '8px 12px', background: '#1B1B1B', borderRadius: 'var(--radius-sm)', border: '1px solid #333', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{m.fullName}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{m.controlNumber}</span>
+                </div>
+              ))}
+            </div>
+
+            <form onSubmit={handleAddPartner} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>Añadir Compañero por Número de Control:</div>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="No. Control (ej. 21280999)"
+                value={partnerControlNum}
+                onChange={(e) => setPartnerControlNum(e.target.value)}
+              />
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Nombre del Compañero"
+                value={partnerFullName}
+                onChange={(e) => setPartnerFullName(e.target.value)}
+              />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowTeamModal(false)}>
+                  Cerrar
+                </button>
+                <button type="submit" className="btn btn-primary btn-sm">
+                  Vincular al Equipo
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Primer Login: Cambio de Contraseña */}
       {showPasswordModal && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: 460 }}>
+          <div className="modal-content" style={{ maxWidth: 440 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <Lock size={22} color="var(--primary)" />
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Primer Inicio de Sesión</h3>
+              <Lock size={20} color="var(--primary)" />
+              <h3 style={{ fontSize: '1.2rem', fontFamily: 'var(--font-header)' }}>Primer Inicio de Sesión</h3>
             </div>
 
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 16 }}>
-              Hola <strong>{studentFullName}</strong>. Por motivos de seguridad escolar, debes sustituir tu contraseña temporal por una nueva contraseña personal para continuar.
+              Hola <strong>{studentFullName}</strong>. Debes cambiar tu contraseña temporal por una contraseña personal para acceder.
             </p>
 
             {passwordError && (
@@ -358,7 +476,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
               <button
                 type="submit"
                 className="btn btn-primary"
-                style={{ marginTop: 10, width: '100%' }}
+                style={{ marginTop: 8, width: '100%' }}
               >
                 Actualizar Contraseña y Acceder
               </button>

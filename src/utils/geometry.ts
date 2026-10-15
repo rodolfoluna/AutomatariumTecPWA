@@ -9,10 +9,10 @@
 
 import { Coordinate, AutomataState, AutomataTransition } from '../types/automata'
 
-export const STATE_RADIUS = 28
-export const LOOP_OFFSET_X = 22
-export const LOOP_OFFSET_Y = 54
-export const TRANSITION_BEND = 36
+export const STATE_RADIUS = 30 // Exacto al STATE_CIRCLE_RADIUS de Automatarium
+export const LOOP_OFFSET_X = 25
+export const LOOP_OFFSET_Y = 58
+export const TRANSITION_BEND = 38
 
 export const lerpPoints = (p1: Coordinate, p2: Coordinate, t: number): Coordinate => ({
   x: p1.x + t * (p2.x - p1.x),
@@ -51,7 +51,6 @@ export const groupTransitions = (
   const stateMap = new Map<number, AutomataState>()
   states.forEach(s => stateMap.set(s.id, s))
 
-  // Clave ordenada para detectar si existe camino en sentido opuesto
   const pairKey = (from: number, to: number) => `${from}->${to}`
   const map = new Map<string, AutomataTransition[]>()
 
@@ -109,9 +108,9 @@ export const calculateTransitionGeometry = (
     const cx = fromState.x
     const cy = fromState.y - STATE_RADIUS
 
-    const startX = cx - 12
+    const startX = cx - 14
     const startY = fromState.y - STATE_RADIUS + 3
-    const endX = cx + 12
+    const endX = cx + 14
     const endY = fromState.y - STATE_RADIUS + 3
 
     const ctrl1X = cx - LOOP_OFFSET_X
@@ -134,7 +133,6 @@ export const calculateTransitionGeometry = (
   const p2 = { x: toState.x, y: toState.y }
   const d = distance(p1, p2)
 
-  // Si hay una transición en reversa (o <-> q), curvamos para no solaparse
   const bend = hasOpposite ? TRANSITION_BEND : 0
 
   const mid = lerpPoints(p1, p2, 0.5)
@@ -147,7 +145,6 @@ export const calculateTransitionGeometry = (
     y: mid.y + normal.y * bend
   }
 
-  // Acortamos la línea para que toque el perímetro del círculo de estado
   const edge1 = movePointTowards(p1, control, STATE_RADIUS)
   const edge2 = movePointTowards(p2, control, STATE_RADIUS)
 
@@ -159,7 +156,6 @@ export const calculateTransitionGeometry = (
     ? { x: mid.x + normal.x * 14, y: mid.y + normal.y * 14 }
     : { x: control.x + normal.x * 6, y: control.y + normal.y * 6 }
 
-  // Ángulo de la flecha al entrar en el estado destino
   const arrowVector = { x: edge2.x - control.x, y: edge2.y - control.y }
   const arrowAngle = Math.atan2(arrowVector.y, arrowVector.x) * (180 / Math.PI)
 

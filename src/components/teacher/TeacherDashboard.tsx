@@ -1,14 +1,13 @@
 /**
- * Panel de Control del Profesor:
- * - Creación de Grupos
- * - Alta de Alumnos individual y masiva por CSV con contraseñas temporales
- * - Creación de Actividades y Ejercicios (AFD y Diagramas Léxicos con autoevaluación)
- * - Monitoreo y revisión de entregas en línea
+ * Panel de Control del Profesor (Estilo Oficial Automatarium):
+ * - Creación de Grupos y alta masiva por CSV
+ * - Creación de Actividades Individuales o En Equipo (con avance compartido)
+ * - Calificador y Monitoreo de Entregas Individuales y por Equipo
  */
 
 import React, { useState } from 'react'
 import { StudentGroup, StudentEnrollment, Activity, Exercise, ActivitySubmission } from '../../types/academic'
-import { Users, FileText, Plus, Upload, Download, CheckCircle, BookOpen, Layers } from 'lucide-react'
+import { Users, FileText, Plus, Upload, Download, CheckCircle, BookOpen, UserCheck, Shield } from 'lucide-react'
 
 interface TeacherDashboardProps {
   groups: StudentGroup[]
@@ -16,7 +15,6 @@ interface TeacherDashboardProps {
   submissions: ActivitySubmission[]
   onSaveGroup: (group: StudentGroup) => void
   onSaveActivity: (activity: Activity) => void
-  onSelectSubmissionForReview?: (submission: ActivitySubmission) => void
 }
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
@@ -40,14 +38,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [generatedCredentials, setGeneratedCredentials] = useState<StudentEnrollment[]>([])
   const [csvText, setCsvText] = useState('')
 
-  // Estado para creación de actividad
+  // Estado para creación de actividad (incluyendo opción EN EQUIPO)
   const [isCreatingActivity, setIsCreatingActivity] = useState(false)
   const [newActTitle, setNewActTitle] = useState('')
   const [newActDesc, setNewActDesc] = useState('')
+  const [isTeamActivity, setIsTeamActivity] = useState(false)
+  const [maxTeamSize, setMaxTeamSize] = useState(2)
   const [selectedGroupForActivity, setSelectedGroupForActivity] = useState<string>(groups[0]?.id || '')
   const [newExercises, setNewExercises] = useState<Exercise[]>([])
 
-  // Función para generar contraseña temporal aleatoria amigable
   const generateTempPassword = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
     let pwd = 'Tec#'
@@ -57,7 +56,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     return pwd
   }
 
-  // Alta individual de alumno
   const handleAddSingleStudent = (e: React.FormEvent) => {
     e.preventDefault()
     if (!singleControlNum.trim() || !singleFullName.trim() || !selectedGroupId) return
@@ -84,7 +82,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     setSingleFullName('')
   }
 
-  // Alta masiva vía CSV
   const handleProcessCSV = () => {
     if (!csvText.trim() || !selectedGroupId) return
 
@@ -122,7 +119,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     }
   }
 
-  // Descargar CSV de credenciales
   const handleDownloadCredentialsCSV = () => {
     if (generatedCredentials.length === 0) return
     let content = 'Numero_Control,Nombre_Completo,Password_Temporal\n'
@@ -139,7 +135,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     URL.revokeObjectURL(url)
   }
 
-  // Crear nuevo grupo
   const handleCreateGroup = (e: React.FormEvent) => {
     e.preventDefault()
     if (!newGroupName.trim()) return
@@ -159,7 +154,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     setNewGroupName('')
   }
 
-  // Agregar ejercicio borrador a la nueva actividad
   const handleAddExerciseToActivity = (type: 'AFD' | 'LEXER_DIAGRAM') => {
     const nextOrder = newExercises.length + 1
     if (type === 'AFD') {
@@ -171,10 +165,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         order: nextOrder,
         alphabet: ['0', '1'],
         testCases: [
-          { input: '0', expectedAccepted: false },
           { input: '01', expectedAccepted: true },
-          { input: '0101', expectedAccepted: true },
-          { input: '00', expectedAccepted: false }
+          { input: '1001', expectedAccepted: true },
+          { input: '0', expectedAccepted: false }
         ]
       }
       setNewExercises([...newExercises, afdEx])
@@ -211,26 +204,30 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       description: newActDesc.trim(),
       createdAt: Date.now(),
       exercises: newExercises,
-      published: true
+      published: true,
+      isTeamActivity,
+      maxTeamSize: isTeamActivity ? maxTeamSize : 1
     }
 
     onSaveActivity(activity)
     setIsCreatingActivity(false)
     setNewActTitle('')
     setNewActDesc('')
+    setIsTeamActivity(false)
+    setMaxTeamSize(2)
     setNewExercises([])
   }
 
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 16px' }}>
-      {/* Encabezado del Profesor */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 20px' }}>
+      {/* Encabezado con Estilo Automatarium */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, borderBottom: '1px solid #333', paddingBottom: 16 }}>
         <div>
-          <h1 style={{ fontSize: '1.75rem', fontWeight: 700, color: '#f8fafc' }}>
-            Panel del Docente
+          <h1 style={{ fontSize: '1.6rem', fontWeight: 700, fontFamily: 'var(--font-header)', color: 'var(--white)' }}>
+            Panel de Gestión Docente
           </h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: 4 }}>
-            Administración de grupos, altas por número de control con contraseñas temporales y asignación de prácticas.
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: 4 }}>
+            Administración de grupos, alumnos por número de control y actividades individuales o en equipo.
           </p>
         </div>
 
@@ -240,56 +237,56 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             className="btn btn-secondary"
             onClick={() => setIsCreatingGroup(true)}
           >
-            <Plus size={16} /> Nuevo Grupo
+            <Plus size={15} /> Nuevo Grupo
           </button>
           <button
             type="button"
             className="btn btn-primary"
             onClick={() => setIsCreatingActivity(true)}
           >
-            <BookOpen size={16} /> Crear Actividad
+            <BookOpen size={15} /> Crear Actividad
           </button>
         </div>
       </div>
 
       {/* Navegación por pestañas */}
-      <div style={{ display: 'flex', gap: 12, borderBottom: '1px solid var(--border)', marginBottom: 24 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 24 }}>
         <button
           type="button"
           className={`btn ${activeTab === 'groups' ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => setActiveTab('groups')}
         >
-          <Users size={16} /> Alumnos y Grupos ({groups.length})
+          <Users size={15} /> Alumnos y Grupos ({groups.length})
         </button>
         <button
           type="button"
           className={`btn ${activeTab === 'activities' ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => setActiveTab('activities')}
         >
-          <FileText size={16} /> Actividades ({activities.length})
+          <FileText size={15} /> Actividades ({activities.length})
         </button>
         <button
           type="button"
           className={`btn ${activeTab === 'submissions' ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => setActiveTab('submissions')}
         >
-          <CheckCircle size={16} /> Entregas y Calificador ({submissions.length})
+          <CheckCircle size={15} /> Entregas ({submissions.length})
         </button>
       </div>
 
       {/* 1. SECCIÓN DE ALUMNOS Y GRUPOS */}
       {activeTab === 'groups' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: 24 }}>
-          {/* Columna Izquierda: Formulario de Alta */}
-          <div className="glass-panel" style={{ padding: 20 }}>
-            <h3 style={{ fontSize: '1.1rem', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Users size={18} color="var(--primary)" />
+          {/* Alta de Alumnos */}
+          <div className="automatarium-card" style={{ padding: 20 }}>
+            <h3 style={{ fontSize: '1.05rem', marginBottom: 14, fontFamily: 'var(--font-header)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Users size={16} color="var(--primary)" />
               Inscripción de Alumnos
             </h3>
 
             <div style={{ marginBottom: 14 }}>
               <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
-                Selecciona Grupo:
+                Grupo destino:
               </label>
               <select
                 className="form-select"
@@ -304,10 +301,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
             {/* Alta Individual */}
             <form onSubmit={handleAddSingleStudent} style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
-              <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#e2e8f0' }}>Alta Individual:</div>
+              <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Alta Individual:</div>
               <input
                 type="text"
                 className="form-input"
+                style={{ fontFamily: 'var(--font-mono)' }}
                 placeholder="Número de Control (ej. 21280145)"
                 value={singleControlNum}
                 onChange={(e) => setSingleControlNum(e.target.value)}
@@ -320,24 +318,25 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 onChange={(e) => setSingleFullName(e.target.value)}
               />
               <button type="submit" className="btn btn-secondary btn-sm">
-                <Plus size={14} /> Dar de Alta Alumno
+                <Plus size={13} /> Generar Acceso Temporal
               </button>
             </form>
 
-            <hr style={{ borderColor: 'var(--border)', margin: '16px 0' }} />
+            <hr style={{ borderColor: '#333', margin: '16px 0' }} />
 
-            {/* Alta Masiva por CSV */}
+            {/* Carga por CSV */}
             <div>
-              <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#e2e8f0', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Upload size={14} color="var(--accent-cyan)" />
+              <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Upload size={14} color="var(--cyan)" />
                 Carga Masiva vía CSV:
               </div>
               <p style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', marginBottom: 8 }}>
-                Pega el texto CSV con formato: <code>numero_control,nombre_completo</code> (una línea por alumno).
+                Formato: <code>numero_control,nombre_completo</code>
               </p>
               <textarea
                 className="form-textarea"
                 rows={4}
+                style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}
                 placeholder={"21280001,García Hernández Juan\n21280002,López Ramírez María"}
                 value={csvText}
                 onChange={(e) => setCsvText(e.target.value)}
@@ -353,16 +352,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </div>
           </div>
 
-          {/* Columna Derecha: Credenciales Generadas y Lista de Grupos */}
+          {/* Credenciales y Lista de Grupos */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* Tarjeta de Contraseñas Temporales Recién Generadas */}
             {generatedCredentials.length > 0 && (
-              <div className="glass-panel" style={{ padding: 20, borderLeft: '4px solid var(--accent-cyan)' }}>
+              <div className="automatarium-card" style={{ padding: 20, borderLeft: '4px solid var(--primary)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <div>
-                    <h4 style={{ fontSize: '1rem', color: '#67e8f9' }}>Credenciales Temporales Generadas</h4>
+                    <h4 style={{ fontSize: '1rem', fontFamily: 'var(--font-header)', color: 'var(--primary)' }}>Credenciales Temporales</h4>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      Entrega esta información a los alumnos. El sistema les exigirá cambiar la contraseña en su primer inicio.
+                      El alumno deberá cambiar esta contraseña en su primer inicio de sesión.
                     </span>
                   </div>
                   <button
@@ -370,25 +368,25 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     className="btn btn-secondary btn-sm"
                     onClick={handleDownloadCredentialsCSV}
                   >
-                    <Download size={14} /> Descargar CSV
+                    <Download size={13} /> Descargar CSV
                   </button>
                 </div>
 
                 <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
                   <table style={{ width: '100%', fontSize: '0.8rem', borderCollapse: 'collapse' }}>
                     <thead>
-                      <tr style={{ background: 'rgba(255,255,255,0.05)', textAlign: 'left' }}>
+                      <tr style={{ background: '#1B1B1B', textAlign: 'left' }}>
                         <th style={{ padding: '6px 8px' }}>No. Control</th>
                         <th style={{ padding: '6px 8px' }}>Nombre</th>
-                        <th style={{ padding: '6px 8px' }}>Password Temporal</th>
+                        <th style={{ padding: '6px 8px' }}>Contraseña Temporal</th>
                       </tr>
                     </thead>
                     <tbody>
                       {generatedCredentials.map((c, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <tr key={i} style={{ borderBottom: '1px solid #333' }}>
                           <td style={{ padding: '6px 8px', fontFamily: 'var(--font-mono)' }}>{c.controlNumber}</td>
                           <td style={{ padding: '6px 8px' }}>{c.fullName}</td>
-                          <td style={{ padding: '6px 8px', fontFamily: 'var(--font-mono)', color: 'var(--warning)' }}>
+                          <td style={{ padding: '6px 8px', fontFamily: 'var(--font-mono)', color: 'var(--primary)', fontWeight: 600 }}>
                             {c.temporaryPassword}
                           </td>
                         </tr>
@@ -399,10 +397,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               </div>
             )}
 
-            {/* Listado de Grupos Activos */}
-            <div className="glass-panel" style={{ padding: 20 }}>
-              <h3 style={{ fontSize: '1.1rem', marginBottom: 14 }}>Grupos Registrados</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="automatarium-card" style={{ padding: 20 }}>
+              <h3 style={{ fontSize: '1.05rem', marginBottom: 14, fontFamily: 'var(--font-header)' }}>Grupos Activos</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {groups.map(group => (
                   <div
                     key={group.id}
@@ -411,9 +408,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       justifyContent: 'space-between',
                       alignItems: 'center',
                       padding: '12px 16px',
-                      background: 'rgba(0,0,0,0.25)',
-                      borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--border)'
+                      background: '#1C1C1C',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid #333'
                     }}
                   >
                     <div>
@@ -421,7 +418,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Periodo: {group.period}</div>
                     </div>
                     <span className="badge badge-afd">
-                      {group.studentControlNumbers.length} Alumnos Inscritos
+                      {group.studentControlNumbers.length} Alumnos
                     </span>
                   </div>
                 ))}
@@ -431,14 +428,27 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         </div>
       )}
 
-      {/* 2. SECCIÓN DE ACTIVIDADES */}
+      {/* 2. SECCIÓN DE ACTIVIDADES (Con soporte individual o en equipo) */}
       {activeTab === 'activities' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {activities.map(act => (
-            <div key={act.id} className="glass-panel" style={{ padding: 20 }}>
+            <div key={act.id} className="automatarium-card" style={{ padding: 20 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                 <div>
-                  <h3 style={{ fontSize: '1.2rem', fontWeight: 600 }}>{act.title}</h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <h3 style={{ fontSize: '1.15rem', fontWeight: 600, fontFamily: 'var(--font-header)' }}>
+                      {act.title}
+                    </h3>
+                    {act.isTeamActivity ? (
+                      <span className="badge badge-team">
+                        👥 En Equipo (Hasta {act.maxTeamSize} alumnos)
+                      </span>
+                    ) : (
+                      <span className="badge badge-afd">
+                        👤 Individual
+                      </span>
+                    )}
+                  </div>
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 4 }}>
                     {act.description}
                   </p>
@@ -461,36 +471,61 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         </div>
       )}
 
-      {/* 3. SECCIÓN DE ENTREGAS Y REVISIÓN EN LÍNEA */}
+      {/* 3. SECCIÓN DE ENTREGAS Y REVISIÓN */}
       {activeTab === 'submissions' && (
-        <div className="glass-panel" style={{ padding: 20 }}>
-          <h3 style={{ fontSize: '1.1rem', marginBottom: 14 }}>Avance y Entregas de Alumnos</h3>
+        <div className="automatarium-card" style={{ padding: 20 }}>
+          <h3 style={{ fontSize: '1.05rem', marginBottom: 14, fontFamily: 'var(--font-header)' }}>
+            Entregas Registradas
+          </h3>
           {submissions.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
-              No hay entregas registradas aún. Cuando los alumnos trabajen fuera de línea y se conecten a internet, sus trabajos se sincronizarán aquí automáticamente.
+            <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+              No hay entregas registradas aún. Los alumnos pueden resolver las prácticas fuera de línea y sus diagramas se sincronizarán aquí al conectar.
             </div>
           ) : (
             <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
               <thead>
-                <tr style={{ background: 'rgba(255,255,255,0.05)', textAlign: 'left' }}>
-                  <th style={{ padding: '8px 12px' }}>Alumno</th>
+                <tr style={{ background: '#1B1B1B', textAlign: 'left' }}>
+                  <th style={{ padding: '8px 12px' }}>Modalidad</th>
+                  <th style={{ padding: '8px 12px' }}>Alumno(s) / Equipo</th>
                   <th style={{ padding: '8px 12px' }}>No. Control</th>
                   <th style={{ padding: '8px 12px' }}>Estado</th>
-                  <th style={{ padding: '8px 12px' }}>Última Sincronización</th>
+                  <th style={{ padding: '8px 12px' }}>Sincronización</th>
                 </tr>
               </thead>
               <tbody>
                 {submissions.map((sub, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                    <td style={{ padding: '8px 12px' }}>{sub.studentName}</td>
-                    <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)' }}>{sub.controlNumber}</td>
+                  <tr key={i} style={{ borderBottom: '1px solid #333' }}>
                     <td style={{ padding: '8px 12px' }}>
-                      <span className={`badge ${sub.overallStatus === 'submitted' ? 'badge-success' : 'badge-warning'}`}>
+                      {sub.isTeamSubmission ? (
+                        <span className="badge badge-team">👥 Equipo</span>
+                      ) : (
+                        <span className="badge badge-afd">👤 Indiv.</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '8px 12px' }}>
+                      {sub.isTeamSubmission && sub.teamMembers ? (
+                        <div>
+                          <strong>{sub.teamName || 'Equipo'}</strong>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            {sub.teamMembers.map(m => m.fullName).join(', ')}
+                          </div>
+                        </div>
+                      ) : (
+                        sub.studentName
+                      )}
+                    </td>
+                    <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)' }}>
+                      {sub.isTeamSubmission && sub.teamMembers 
+                        ? sub.teamMembers.map(m => m.controlNumber).join(', ')
+                        : sub.controlNumber}
+                    </td>
+                    <td style={{ padding: '8px 12px' }}>
+                      <span className={`badge ${sub.overallStatus === 'submitted' ? 'badge-success' : 'badge-afd'}`}>
                         {sub.overallStatus === 'submitted' ? 'Entregado' : 'Borrador'}
                       </span>
                     </td>
-                    <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
-                      {sub.lastSyncedAt ? new Date(sub.lastSyncedAt).toLocaleString() : 'En caché local'}
+                    <td style={{ padding: '8px 12px', color: 'var(--text-muted)', fontSize: '0.775rem' }}>
+                      {sub.lastSyncedAt ? new Date(sub.lastSyncedAt).toLocaleTimeString() : 'En caché local'}
                     </td>
                   </tr>
                 ))}
@@ -504,10 +539,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       {isCreatingGroup && (
         <div className="modal-overlay" onClick={() => setIsCreatingGroup(false)}>
           <div className="modal-content" style={{ maxWidth: 450 }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ marginBottom: 14 }}>Crear Nuevo Grupo</h3>
+            <h3 style={{ marginBottom: 14, fontFamily: 'var(--font-header)' }}>Crear Nuevo Grupo</h3>
             <form onSubmit={handleCreateGroup} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
-                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Nombre de la Materia / Grupo:</label>
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Nombre del Grupo:</label>
                 <input
                   type="text"
                   className="form-input"
@@ -518,7 +553,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 />
               </div>
               <div>
-                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Periodo Escolar:</label>
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Periodo:</label>
                 <input
                   type="text"
                   className="form-input"
@@ -539,18 +574,18 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         </div>
       )}
 
-      {/* Modal: Crear Actividad con Ejercicios */}
+      {/* Modal: Crear Actividad (con opción individual o en equipo) */}
       {isCreatingActivity && (
         <div className="modal-overlay" onClick={() => setIsCreatingActivity(false)}>
-          <div className="modal-content" style={{ maxWidth: 680 }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ marginBottom: 14 }}>Nueva Actividad Práctica</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="modal-content" style={{ maxWidth: 650 }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginBottom: 14, fontFamily: 'var(--font-header)' }}>Nueva Actividad Práctica</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
                 <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Título de la Actividad:</label>
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="ej. Práctica 1: Modelado de AFD y Tokens"
+                  placeholder="ej. Práctica 2: Analizador Léxico en Equipo"
                   value={newActTitle}
                   onChange={(e) => setNewActTitle(e.target.value)}
                 />
@@ -561,13 +596,51 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 <textarea
                   className="form-textarea"
                   rows={2}
-                  placeholder="Describe los objetivos de la actividad..."
+                  placeholder="Instrucciones para los estudiantes..."
                   value={newActDesc}
                   onChange={(e) => setNewActDesc(e.target.value)}
                 />
               </div>
 
-              {/* Botones para agregar ejercicios */}
+              {/* OPCIÓN: ACTIVIDAD INDIVIDUAL VS ACTIVIDAD EN EQUIPO */}
+              <div style={{
+                padding: '14px',
+                background: '#191919',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid #383838'
+              }}>
+                <label style={{ fontWeight: 600, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={isTeamActivity}
+                    onChange={(e) => setIsTeamActivity(e.target.checked)}
+                  />
+                  <span>¿Es una Actividad en Equipo? (Compartir el mismo avance)</span>
+                </label>
+
+                {isTeamActivity && (
+                  <div style={{ marginTop: 12, paddingLeft: 24, display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      Integrantes por equipo:
+                    </label>
+                    <select
+                      className="form-select"
+                      style={{ width: 140 }}
+                      value={maxTeamSize}
+                      onChange={(e) => setMaxTeamSize(Number(e.target.value))}
+                    >
+                      <option value={2}>2 alumnos</option>
+                      <option value={3}>3 alumnos</option>
+                      <option value={4}>4 alumnos</option>
+                    </select>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-subtle)' }}>
+                      Cualquier integrante que guarde o entregue actualizará el avance común del equipo.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Ejercicios */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>Ejercicios ({newExercises.length}):</label>
@@ -589,15 +662,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '200px', overflowY: 'auto' }}>
-                  {newExercises.map((ex, idx) => (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '180px', overflowY: 'auto' }}>
+                  {newExercises.map(ex => (
                     <div
                       key={ex.id}
                       style={{
-                        padding: '10px 14px',
-                        background: 'rgba(0,0,0,0.3)',
+                        padding: '8px 12px',
+                        background: '#1A1A1A',
                         borderRadius: 'var(--radius-sm)',
-                        borderLeft: `3px solid ${ex.type === 'LEXER_DIAGRAM' ? 'var(--accent-cyan)' : 'var(--primary)'}`
+                        borderLeft: `3px solid ${ex.type === 'LEXER_DIAGRAM' ? 'var(--cyan)' : 'var(--primary)'}`
                       }}
                     >
                       <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{ex.title}</div>
@@ -607,7 +680,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setIsCreatingActivity(false)}>
                   Cancelar
                 </button>
@@ -617,7 +690,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   disabled={newExercises.length === 0 || !newActTitle.trim()}
                   onClick={handleSaveNewActivity}
                 >
-                  Publicar Actividad a Grupo
+                  Publicar Actividad
                 </button>
               </div>
             </div>

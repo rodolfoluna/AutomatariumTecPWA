@@ -1,5 +1,5 @@
 /**
- * Tipos de datos para el módulo académico (Profesor, Alumnos, Grupos, Actividades).
+ * Tipos de datos para el módulo académico (Profesor, Alumnos, Grupos, Actividades, Equipos).
  */
 
 import { AutomataGraph, StringTestCase, LexerTestCase } from './automata'
@@ -68,6 +68,10 @@ export interface Activity {
   dueDate?: number             // Timestamp opcional de fecha límite
   exercises: Exercise[]
   published: boolean
+  
+  // Soporte para actividades en equipo
+  isTeamActivity?: boolean     // true: actividad en equipo, false: individual
+  maxTeamSize?: number         // Número de integrantes (ej: 2 o 3 alumnos)
 }
 
 export type SubmissionStatus = 'draft' | 'submitted' | 'graded'
@@ -84,7 +88,7 @@ export interface ExerciseSubmission {
 }
 
 export interface ActivitySubmission {
-  id: string                   // `${activityId}_${controlNumber}`
+  id: string                   // `${activityId}_${controlNumber}` o `team_${activityId}_${teamId}`
   activityId: string
   studentUid: string
   controlNumber: string
@@ -95,4 +99,19 @@ export interface ActivitySubmission {
   submittedAt?: number
   lastSyncedAt?: number
   isDirtyLocally?: boolean     // Para control de sincronización offline
+  
+  // Metadatos de actividad en equipo
+  isTeamSubmission?: boolean
+  teamId?: string
+  teamName?: string
+  teamMembers?: Array<{
+    controlNumber: string
+    fullName: string
+  }>
+  lastEditedBy?: {
+    controlNumber: string
+    fullName: string
+    timestamp: number
+  }
+  version?: number             // Contador incremental para resolución de concurrencia offline
 }
