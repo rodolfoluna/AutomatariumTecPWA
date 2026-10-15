@@ -21,7 +21,8 @@ import {
   CheckCircle2, 
   ZoomIn, 
   ZoomOut, 
-  Maximize2 
+  Maximize2,
+  X
 } from 'lucide-react'
 
 type CanvasTool = 'cursor' | 'hand' | 'state' | 'transition'
@@ -59,9 +60,14 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
   const isLexerMode = graph.projectType === 'LEXER_DIAGRAM'
 
-  // Manejar clic en el canvas según la herramienta activa
+  // Manejar clic en el canvas según la herramienta activa (solo en el fondo)
   const handleCanvasClick = (e: React.MouseEvent) => {
     if (readOnly) return
+
+    // Solo procesar si el clic fue directamente en el fondo del lienzo o en el SVG
+    const target = e.target as HTMLElement | SVGElement
+    const isBackground = target === svgRef.current || target.id === 'automatarium-graph'
+    if (!isBackground) return
 
     if (selectedTool === 'state') {
       const svgRect = svgRef.current?.getBoundingClientRect()
@@ -484,6 +490,11 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                   transform={`translate(${state.x}, ${state.y})`}
                   style={{ cursor: selectedTool === 'cursor' ? 'grab' : 'pointer' }}
                   onMouseDown={(e) => handleMouseDownState(e, state)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSelectedStateId(state.id)
+                    setSelectedTransId(null)
+                  }}
                 >
                   {/* Flecha indicadora de Estado Inicial estilo Automatarium */}
                   {isInitial && (
@@ -576,20 +587,33 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         {selectedState && !readOnly && (
           <div 
             className="automatarium-card"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
             style={{
               position: 'absolute',
               bottom: 16,
               left: 16,
-              width: 300,
+              width: 320,
               padding: 16,
-              zIndex: 20
+              zIndex: 30
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <span style={{ fontWeight: 600, fontSize: '0.95rem', fontFamily: 'var(--font-header)' }}>
                 Estado: {selectedState.name || `q${selectedState.id}`}
               </span>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', fontFamily: 'var(--font-mono)' }}>ID #{selectedState.id}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', fontFamily: 'var(--font-mono)' }}>ID #{selectedState.id}</span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ padding: '2px 6px', fontSize: '0.75rem' }}
+                  onClick={() => setSelectedStateId(null)}
+                  title="Cerrar panel de propiedades"
+                >
+                  <X size={13} />
+                </button>
+              </div>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
