@@ -8,6 +8,9 @@
 
 import React, { useState } from 'react'
 import { StudentGroup, StudentEnrollment, Activity, Exercise, ActivitySubmission, AFDExercise, LexerExercise } from '../../types/academic'
+import { GraphCanvas } from '../canvas/GraphCanvas'
+import { runAFDTestSuite } from '../../simulation/afdSimulator'
+import { runLexerTestSuite } from '../../simulation/lexerSimulator'
 import { 
   Users, 
   FileText, 
@@ -21,7 +24,10 @@ import {
   Save, 
   Check, 
   X,
-  Layers
+  Layers,
+  Eye,
+  Award,
+  MessageSquare
 } from 'lucide-react'
 
 interface TeacherDashboardProps {
@@ -31,6 +37,7 @@ interface TeacherDashboardProps {
   onSaveGroup: (group: StudentGroup) => void
   onSaveActivity: (activity: Activity) => void
   onDeleteActivity?: (activityId: string) => void
+  onUpdateSubmission?: (submission: ActivitySubmission) => void
 }
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
@@ -39,7 +46,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   submissions,
   onSaveGroup,
   onSaveActivity,
-  onDeleteActivity
+  onDeleteActivity,
+  onUpdateSubmission
 }) => {
   const [activeTab, setActiveTab] = useState<'groups' | 'activities' | 'submissions'>('activities')
 
@@ -69,6 +77,38 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   // Ejercicio seleccionado para edición detallada
   const [editingExerciseId, setEditingExerciseId] = useState<string | null>(null)
+
+  // Estado para Revisión y Calificación de Entregas
+  const [reviewingSubmission, setReviewingSubmission] = useState<ActivitySubmission | null>(null)
+  const [reviewExerciseIndex, setReviewExerciseIndex] = useState(0)
+  const [reviewGrade, setReviewGrade] = useState<number>(100)
+  const [reviewFeedback, setReviewFeedback] = useState<string>('')
+  const [reviewSaveSuccess, setReviewSaveSuccess] = useState(false)
+
+  const handleOpenReview = (sub: ActivitySubmission) => {
+    setReviewingSubmission(sub)
+    setReviewExerciseIndex(0)
+    setReviewGrade(sub.grade ?? 100)
+    setReviewFeedback(sub.teacherFeedback ?? '')
+    setReviewSaveSuccess(false)
+  }
+
+  const handleSaveReview = () => {
+    if (!reviewingSubmission) return
+    const updated: ActivitySubmission = {
+      ...reviewingSubmission,
+      overallStatus: 'graded',
+      grade: Number(reviewGrade) || 0,
+      teacherFeedback: reviewFeedback.trim(),
+      lastSyncedAt: Date.now()
+    }
+    setReviewingSubmission(updated)
+    if (onUpdateSubmission) {
+      onUpdateSubmission(updated)
+    }
+    setReviewSaveSuccess(true)
+    setTimeout(() => setReviewSaveSuccess(false), 2500)
+  }
 
   const generateTempPassword = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -602,6 +642,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   <th style={{ padding: '8px 12px' }}>Alumno(s) / Equipo</th>
                   <th style={{ padding: '8px 12px' }}>No. Control</th>
                   <th style={{ padding: '8px 12px' }}>Estado</th>
+                  <th style={{ padding: '8px 12px' }}>Calificación</th>
+                  <th style={{ padding: '8px 12px' }}>Acciones</th>
                   <th style={{ padding: '8px 12px' }}>Sincronización</th>
                 </tr>
               </thead>
@@ -633,9 +675,28 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                         : sub.controlNumber}
                     </td>
                     <td style={{ padding: '8px 12px' }}>
-                      <span className={`badge ${sub.overallStatus === 'submitted' ? 'badge-success' : 'badge-afd'}`}>
-                        {sub.overallStatus === 'submitted' ? 'Entregado' : 'Borrador'}
+                      <span className={`badge ${sub.overallStatus === 'graded' ? 'badge-success' : sub.overallStatus === 'submitted' ? 'badge-lexer' : 'badge-afd'}`}>
+                        {sub.overallStatus === 'graded' ? 'Calificado' : sub.overallStatus === 'submitted' ? 'Entregado' : 'Borrador'}
                       </span>
+                    </td>
+                    <td style={{ padding: '8px 12px' }}>
+                      {sub.overallStatus === 'graded' && sub.grade !== undefined ? (
+                        <span style={{ fontWeight: 600, color: sub.grade >= 70 ? 'var(--green)' : '#F87171' }}>
+                          {sub.grade} / 100
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--text-subtle)' }}>Pendiente</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '8px 12px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        style={{ padding: '4px 10px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 5 }}
+                        onClick={() => handleOpenReview(sub)}
+                      >
+                        <Eye size={13} /> Revisar y Calificar
+                      </button>
                     </td>
                     <td style={{ padding: '8px 12px', color: 'var(--text-muted)', fontSize: '0.775rem' }}>
                       {sub.lastSyncedAt ? new Date(sub.lastSyncedAt).toLocaleTimeString() : 'En caché local'}
@@ -1006,6 +1067,259 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 4. MODAL PARA REVISAR Y CALIFICAR ENTREGA */}
+      {reviewingSubmission && (
+        <div className="modal-overlay" onClick={() => setReviewingSubmission(null)}>
+          <div
+            className="modal-content"
+            style={{ maxWidth: 1040, maxHeight: '92vh', display: 'flex', flexDirection: 'column', gap: 14 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header del modal */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #333', paddingBottom: 12 }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-header)' }}>
+                    Revisión de Entrega
+                  </h3>
+                  {reviewingSubmission.isTeamSubmission ? (
+                    <span className="badge badge-team">👥 En Equipo</span>
+                  ) : (
+                    <span className="badge badge-afd">👤 Individual</span>
+                  )}
+                  {reviewingSubmission.overallStatus === 'graded' && (
+                    <span className="badge badge-success">
+                      Calificado ({reviewingSubmission.grade}/100)
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                  <strong>Actividad:</strong> {activities.find(a => a.id === reviewingSubmission.activityId)?.title || reviewingSubmission.activityId} | 
+                  <strong style={{ marginLeft: 8 }}>Alumno(s):</strong> {
+                    reviewingSubmission.isTeamSubmission && reviewingSubmission.teamMembers 
+                      ? reviewingSubmission.teamMembers.map(m => `${m.fullName} (${m.controlNumber})`).join(', ')
+                      : `${reviewingSubmission.studentName} (${reviewingSubmission.controlNumber})`
+                  }
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setReviewingSubmission(null)}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Stepper / pestañas de ejercicios */}
+            {(() => {
+              const reviewAct = activities.find(a => a.id === reviewingSubmission.activityId)
+              const exercises = reviewAct?.exercises || []
+              const currentEx = exercises[reviewExerciseIndex] || exercises[0]
+              const subEx = currentEx ? reviewingSubmission.exerciseSubmissions?.[currentEx.id] : undefined
+              const graph = subEx?.graph || {
+                projectType: currentEx?.type === 'LEXER_DIAGRAM' ? 'LEXER_DIAGRAM' : 'AFD',
+                states: [],
+                transitions: [],
+                initialState: null
+              }
+
+              // Evaluar test suite en vivo
+              const afdResults = currentEx?.type === 'AFD'
+                ? runAFDTestSuite(graph, (currentEx as AFDExercise).testCases)
+                : null
+
+              const lexerResults = currentEx?.type === 'LEXER_DIAGRAM'
+                ? runLexerTestSuite(graph, (currentEx as LexerExercise).testCases)
+                : null
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
+                  {/* Pestañas de Ejercicios */}
+                  {exercises.length > 1 && (
+                    <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid #333', paddingBottom: 8 }}>
+                      {exercises.map((ex, idx) => {
+                        const exSub = reviewingSubmission.exerciseSubmissions?.[ex.id]
+                        return (
+                          <button
+                            key={ex.id}
+                            type="button"
+                            className={`btn btn-sm ${reviewExerciseIndex === idx ? 'btn-primary' : 'btn-secondary'}`}
+                            onClick={() => setReviewExerciseIndex(idx)}
+                          >
+                            {ex.title} {exSub ? `(${exSub.testsPassed}/${exSub.testsTotal})` : ''}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* Cuerpo principal de revisión */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16, flex: 1, minHeight: 460 }}>
+                    {/* Lienzo del Alumno */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontWeight: 600, fontSize: '0.9rem', fontFamily: 'var(--font-header)' }}>
+                          {currentEx?.title}
+                        </span>
+                        <span className={`badge ${currentEx?.type === 'LEXER_DIAGRAM' ? 'badge-lexer' : 'badge-afd'}`}>
+                          {currentEx?.type === 'LEXER_DIAGRAM' ? 'Diagrama Léxico' : 'AFD'}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        {currentEx?.instructions}
+                      </p>
+
+                      <div style={{ flex: 1, minHeight: 380, border: '1px solid #333', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+                        <GraphCanvas
+                          graph={graph}
+                          readOnly={true}
+                          onChange={() => {}}
+                        />
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-subtle)', textAlign: 'right' }}>
+                        Visualización en modo lectura • {graph.states.length} estados • {graph.transitions.length} transiciones
+                      </div>
+                    </div>
+
+                    {/* Columna Derecha: Pruebas Automáticas y Calificación */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', maxHeight: 520, paddingRight: 4 }}>
+                      {/* 1. Resultados de pruebas */}
+                      <div className="automatarium-card" style={{ padding: 14 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                          <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                            Pruebas Automáticas
+                          </span>
+                          {afdResults && (
+                            <span className={`badge ${afdResults.passedCount === afdResults.totalCount ? 'badge-success' : 'badge-afd'}`}>
+                              {afdResults.passedCount} / {afdResults.totalCount} pasadas ({afdResults.scorePercentage}%)
+                            </span>
+                          )}
+                          {lexerResults && (
+                            <span className={`badge ${lexerResults.passedCount === lexerResults.totalCount ? 'badge-success' : 'badge-lexer'}`}>
+                              {lexerResults.passedCount} / {lexerResults.totalCount} pasadas ({lexerResults.scorePercentage}%)
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Listado de Casos AFD */}
+                        {afdResults && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflowY: 'auto' }}>
+                            {afdResults.evaluations.map((ev, i) => (
+                              <div
+                                key={i}
+                                style={{
+                                  padding: '6px 10px',
+                                  background: '#1A1A1A',
+                                  border: `1px solid ${ev.passed ? 'rgba(74, 222, 128, 0.25)' : 'rgba(248, 113, 113, 0.35)'}`,
+                                  borderRadius: 'var(--radius-sm)',
+                                  fontSize: '0.775rem'
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                  <span style={{ fontFamily: 'var(--font-mono)' }}>Entrada: "{ev.testCase.input}"</span>
+                                  <span style={{ color: ev.passed ? 'var(--green)' : '#F87171', fontWeight: 600 }}>
+                                    {ev.passed ? '✓ Pasó' : '✗ Falló'}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                                  Esperado: {ev.testCase.expectedAccepted ? 'Aceptada' : 'Rechazada'} | Obtenido: {ev.actualAccepted ? 'Aceptada' : 'Rechazada'}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Listado de Casos Léxico */}
+                        {lexerResults && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflowY: 'auto' }}>
+                            {lexerResults.evaluations.map((ev, i) => (
+                              <div
+                                key={i}
+                                style={{
+                                  padding: '6px 10px',
+                                  background: '#1A1A1A',
+                                  border: `1px solid ${ev.passed ? 'rgba(74, 222, 128, 0.25)' : 'rgba(248, 113, 113, 0.35)'}`,
+                                  borderRadius: 'var(--radius-sm)',
+                                  fontSize: '0.775rem'
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                  <span style={{ fontFamily: 'var(--font-mono)' }}>Código: "{ev.testCase.sourceCode}"</span>
+                                  <span style={{ color: ev.passed ? 'var(--green)' : '#F87171', fontWeight: 600 }}>
+                                    {ev.passed ? '✓ Pasó' : '✗ Falló'}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                                  {ev.message}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 2. Sección de Calificación Docente */}
+                      <div className="automatarium-card" style={{ padding: 14 }}>
+                        <h4 style={{ fontSize: '0.85rem', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Award size={15} color="var(--primary)" /> Calificación y Retroalimentación
+                        </h4>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          <div>
+                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                              Calificación Final (0 - 100):
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              className="form-input"
+                              style={{ fontFamily: 'var(--font-mono)', width: '120px' }}
+                              value={reviewGrade}
+                              onChange={(e) => setReviewGrade(Number(e.target.value))}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                              Comentarios / Retroalimentación para el Alumno o Equipo:
+                            </label>
+                            <textarea
+                              className="form-input"
+                              rows={3}
+                              placeholder="Ej: Excelente diseño del estado de aceptación. Revisa la rama de retroceso con el asterisco."
+                              value={reviewFeedback}
+                              onChange={(e) => setReviewFeedback(e.target.value)}
+                            />
+                          </div>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                            {reviewSaveSuccess ? (
+                              <span style={{ fontSize: '0.8rem', color: 'var(--green)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <Check size={14} /> ¡Calificación guardada con éxito!
+                              </span>
+                            ) : <span />}
+
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={handleSaveReview}
+                            >
+                              <Save size={13} /> Guardar Calificación
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         </div>
       )}

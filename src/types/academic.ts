@@ -114,4 +114,6 @@ export interface ActivitySubmission {
     timestamp: number
   }
   version?: number             // Contador incremental para resolución de concurrencia offline
+  grade?: number               // Calificación global asignada por el profesor (0-100)
+  teacherFeedback?: string     // Retroalimentación docente global
 }

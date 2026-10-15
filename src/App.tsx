@@ -10,6 +10,8 @@ import { Navbar } from './components/common/Navbar'
 import { AboutModal } from './components/common/AboutModal'
 import { TeacherDashboard } from './components/teacher/TeacherDashboard'
 import { StudentView } from './components/student/StudentView'
+import { initSyncService } from './services/syncService'
+import { localDB } from './db/indexedDb'
 
 // Datos iniciales demostrativos (con actividad individual y actividad en equipo)
 const INITIAL_GROUPS: StudentGroup[] = [
@@ -84,17 +86,122 @@ const INITIAL_ACTIVITIES: Activity[] = [
   }
 ]
 
+const INITIAL_SUBMISSIONS: ActivitySubmission[] = [
+  {
+    id: 'act_practica_1_21280145',
+    activityId: 'act_practica_1',
+    studentUid: 'student_21280145',
+    controlNumber: '21280145',
+    studentName: 'García Hernández Juan',
+    groupId: 'gpo_lenguajes_7a',
+    overallStatus: 'submitted',
+    submittedAt: Date.now() - 3600000 * 2,
+    lastSyncedAt: Date.now() - 3600000 * 2,
+    isDirtyLocally: false,
+    isTeamSubmission: false,
+    exerciseSubmissions: {
+      ex_afd_binario: {
+        exerciseId: 'ex_afd_binario',
+        status: 'submitted',
+        testsPassed: 4,
+        testsTotal: 4,
+        score: 100,
+        updatedAt: Date.now() - 3600000 * 2,
+        graph: {
+          projectType: 'AFD',
+          states: [
+            { id: 0, name: 'q0', x: 140, y: 160, isFinal: false },
+            { id: 1, name: 'q1', x: 280, y: 160, isFinal: false },
+            { id: 2, name: 'q2', x: 420, y: 160, isFinal: true }
+          ],
+          transitions: [
+            { id: 1, from: 0, to: 1, read: '0' },
+            { id: 2, from: 0, to: 0, read: '1' },
+            { id: 3, from: 1, to: 1, read: '0' },
+            { id: 4, from: 1, to: 2, read: '1' },
+            { id: 5, from: 2, to: 1, read: '0' },
+            { id: 6, from: 2, to: 0, read: '1' }
+          ],
+          initialState: 0
+        }
+      }
+    }
+  },
+  {
+    id: 'team_act_practica_2_21280145_21280999',
+    activityId: 'act_practica_2',
+    studentUid: 'student_21280145',
+    controlNumber: '21280145',
+    studentName: 'García Hernández Juan',
+    groupId: 'gpo_lenguajes_7a',
+    overallStatus: 'submitted',
+    submittedAt: Date.now() - 3600000 * 1,
+    lastSyncedAt: Date.now() - 3600000 * 1,
+    isDirtyLocally: false,
+    isTeamSubmission: true,
+    teamId: 'team_act_practica_2_21280145_21280999',
+    teamName: 'Equipo: Juan & Carlos',
+    teamMembers: [
+      { controlNumber: '21280145', fullName: 'García Hernández Juan' },
+      { controlNumber: '21280999', fullName: 'Sánchez Morales Carlos' }
+    ],
+    lastEditedBy: {
+      controlNumber: '21280999',
+      fullName: 'Sánchez Morales Carlos',
+      timestamp: Date.now() - 3600000 * 1
+    },
+    version: 3,
+    exerciseSubmissions: {
+      ex_lexer_tokens: {
+        exerciseId: 'ex_lexer_tokens',
+        status: 'submitted',
+        testsPassed: 1,
+        testsTotal: 1,
+        score: 100,
+        updatedAt: Date.now() - 3600000 * 1,
+        graph: {
+          projectType: 'LEXER_DIAGRAM',
+          states: [
+            { id: 0, name: 'q0', x: 120, y: 160, isFinal: false },
+            { id: 1, name: 'q1', x: 260, y: 120, isFinal: false },
+            { id: 2, name: 'q2', x: 400, y: 120, isFinal: true, token: 'TOKEN_ID', retract: true, installSymbolTable: true },
+            { id: 3, name: 'q3', x: 260, y: 220, isFinal: false },
+            { id: 4, name: 'q4', x: 400, y: 220, isFinal: true, token: 'TOKEN_NUM_INT', retract: true }
+          ],
+          transitions: [
+            { id: 1, from: 0, to: 1, read: '[a-zA-Z]' },
+            { id: 2, from: 1, to: 1, read: '[a-zA-Z0-9]' },
+            { id: 3, from: 1, to: 2, read: 'otro' },
+            { id: 4, from: 0, to: 3, read: '[0-9]' },
+            { id: 5, from: 3, to: 3, read: '[0-9]' },
+            { id: 6, from: 3, to: 4, read: 'otro' }
+          ],
+          initialState: 0
+        }
+      }
+    }
+  }
+]
+
 export const App: React.FC = () => {
   const [currentRole, setCurrentRole] = useState<UserRole>('student')
   const [isAboutOpen, setIsAboutOpen] = useState(false)
   const [groups, setGroups] = useState<StudentGroup[]>(INITIAL_GROUPS)
   const [activities, setActivities] = useState<Activity[]>(INITIAL_ACTIVITIES)
-  const [submissions, setSubmissions] = useState<ActivitySubmission[]>([])
+  const [submissions, setSubmissions] = useState<ActivitySubmission[]>(INITIAL_SUBMISSIONS)
 
   // Alumno actual
   const [studentControlNumber] = useState('21280145')
   const [studentFullName] = useState('García Hernández Juan')
   const [mustChangePassword, setMustChangePassword] = useState(false)
+
+  // Inicializar servicio de sincronización en segundo plano
+  React.useEffect(() => {
+    const cleanup = initSyncService((status) => {
+      // Estado de sincronización en tiempo real
+    })
+    return cleanup
+  }, [])
 
   const handleSaveGroup = (group: StudentGroup) => {
     setGroups(prev => {
@@ -136,6 +243,19 @@ export const App: React.FC = () => {
     })
   }
 
+  const handleUpdateSubmission = (updated: ActivitySubmission) => {
+    setSubmissions(prev => {
+      const idx = prev.findIndex(s => s.id === updated.id)
+      if (idx >= 0) {
+        const copy = [...prev]
+        copy[idx] = updated
+        return copy
+      }
+      return [updated, ...prev]
+    })
+    localDB.cachedSubmissions.put(updated).catch(() => {})
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-main)' }}>
       {/* Barra de navegación global estilo Automatarium */}
@@ -156,6 +276,7 @@ export const App: React.FC = () => {
             onSaveGroup={handleSaveGroup}
             onSaveActivity={handleSaveActivity}
             onDeleteActivity={handleDeleteActivity}
+            onUpdateSubmission={handleUpdateSubmission}
           />
         ) : (
           <StudentView

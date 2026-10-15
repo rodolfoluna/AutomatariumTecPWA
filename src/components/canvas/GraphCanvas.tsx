@@ -420,8 +420,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                     fill="none"
                     stroke="transparent"
                     strokeWidth="20"
-                    style={{ cursor: 'pointer' }}
                     onClick={(e) => {
+                      if (readOnly) return
                       e.stopPropagation()
                       setSelectedTransId(gt.transitions[0].id)
                       setSelectedStateId(null)
@@ -442,8 +442,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                   {/* Rotulación / Etiqueta del arco */}
                   <g
                     transform={`translate(${geom.labelPos.x}, ${geom.labelPos.y})`}
-                    style={{ cursor: 'pointer' }}
+                    style={{ cursor: readOnly ? 'default' : 'pointer' }}
                     onClick={(e) => {
+                      if (readOnly) return
                       e.stopPropagation()
                       setSelectedTransId(gt.transitions[0].id)
                       setEditingTransition(gt.transitions[0])
@@ -690,7 +691,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       </div>
 
       {/* Modal para editar símbolo de la transición */}
-      {editingTransition && (
+      {editingTransition && !readOnly && (
         <div className="modal-overlay" onClick={() => setEditingTransition(null)}>
           <div className="modal-content" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
             <h3 style={{ marginBottom: 12, fontSize: '1.1rem', fontFamily: 'var(--font-header)' }}>Símbolo de la Transición</h3>

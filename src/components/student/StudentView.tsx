@@ -7,11 +7,13 @@
  */
 
 import React, { useState, useEffect } from 'react'
-import { Activity, Exercise, ActivitySubmission } from '../../types/academic'
+import { Activity, Exercise, ActivitySubmission, ExerciseSubmission, AFDExercise, LexerExercise } from '../../types/academic'
 import { AutomataGraph } from '../../types/automata'
 import { GraphCanvas } from '../canvas/GraphCanvas'
 import { AFDSimulatorPanel } from '../simulation/AFDSimulatorPanel'
 import { LexerSimulatorPanel } from '../simulation/LexerSimulatorPanel'
+import { runAFDTestSuite } from '../../simulation/afdSimulator'
+import { runLexerTestSuite } from '../../simulation/lexerSimulator'
 import { localDB } from '../../db/indexedDb'
 import { 
   Lock, 
@@ -163,6 +165,51 @@ export const StudentView: React.FC<StudentViewProps> = ({
       ? teamId
       : `${selectedActivity.id}_${studentControlNumber}`
 
+    // Compilar todos los ejercicios de la actividad (del borrador local o del grafo actual)
+    const exerciseSubmissions: Record<string, ExerciseSubmission> = {}
+
+    for (const ex of selectedActivity.exercises) {
+      let graphToEvaluate = currentGraph
+      if (ex.id !== currentExercise.id) {
+        const storageKey = isTeam && teamId
+          ? `${teamId}_${ex.id}`
+          : `${selectedActivity.id}_${ex.id}`
+        const draft = await localDB.drafts.get(storageKey)
+        if (draft) {
+          graphToEvaluate = draft.graph
+        } else {
+          graphToEvaluate = {
+            projectType: ex.type === 'LEXER_DIAGRAM' ? 'LEXER_DIAGRAM' : 'AFD',
+            states: [{ id: 0, name: 'q0', x: 140, y: 160, isFinal: false }],
+            transitions: [],
+            initialState: 0
+          }
+        }
+      }
+
+      let testsPassed = 0
+      let testsTotal = ex.testCases.length
+      if (ex.type === 'AFD') {
+        const results = runAFDTestSuite(graphToEvaluate, (ex as AFDExercise).testCases)
+        testsPassed = results.passedCount
+        testsTotal = results.totalCount
+      } else {
+        const results = runLexerTestSuite(graphToEvaluate, (ex as LexerExercise).testCases)
+        testsPassed = results.passedCount
+        testsTotal = results.totalCount
+      }
+
+      exerciseSubmissions[ex.id] = {
+        exerciseId: ex.id,
+        graph: graphToEvaluate,
+        status: 'submitted',
+        testsPassed,
+        testsTotal,
+        score: testsTotal > 0 ? Math.round((testsPassed / testsTotal) * 100) : 100,
+        updatedAt: Date.now()
+      }
+    }
+
     const submission: ActivitySubmission = {
       id: submissionId,
       activityId: selectedActivity.id,
@@ -183,16 +230,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
         timestamp: Date.now()
       },
       version: 1,
-      exerciseSubmissions: {
-        [currentExercise.id]: {
-          exerciseId: currentExercise.id,
-          graph: currentGraph,
-          status: 'submitted',
-          testsPassed: 1,
-          testsTotal: 1,
-          updatedAt: Date.now()
-        }
-      }
+      exerciseSubmissions
     }
 
     await localDB.cachedSubmissions.put(submission)
