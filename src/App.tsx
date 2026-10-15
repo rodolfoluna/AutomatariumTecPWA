@@ -5,7 +5,7 @@
  */
 
 import React, { useState } from 'react'
-import { UserRole, StudentGroup, Activity, ActivitySubmission, UserProfile } from './types/academic'
+import { StudentGroup, Activity, ActivitySubmission, UserProfile } from './types/academic'
 import { Navbar } from './components/common/Navbar'
 import { AboutModal } from './components/common/AboutModal'
 import { TeacherDashboard } from './components/teacher/TeacherDashboard'
@@ -192,52 +192,13 @@ const INITIAL_SUBMISSIONS: ActivitySubmission[] = [
 ]
 
 export const App: React.FC = () => {
-  // Sesión de usuario activo (por defecto carga sesión almacenada o Juan García)
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
-    return getStoredSession() || {
-      uid: 'student_21280145',
-      email: '21280145@tec.edu.mx',
-      role: 'student',
-      fullName: 'García Hernández Juan',
-      controlNumber: '21280145',
-      mustChangePassword: false,
-      createdAt: Date.now()
-    }
-  })
+  // Sesión de usuario activo (obtenida de localStorage si existe)
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStoredSession())
 
   const [isAboutOpen, setIsAboutOpen] = useState(false)
   const [groups, setGroups] = useState<StudentGroup[]>(INITIAL_GROUPS)
   const [activities, setActivities] = useState<Activity[]>(INITIAL_ACTIVITIES)
   const [submissions, setSubmissions] = useState<ActivitySubmission[]>(INITIAL_SUBMISSIONS)
-
-  // Rol sincronizado con el usuario activo
-  const currentRole = currentUser?.role || 'student'
-
-  const handleRoleChange = (newRole: UserRole) => {
-    if (newRole === 'teacher') {
-      const teacherProfile: UserProfile = {
-        uid: 'prof_mendoza',
-        email: 'prof_mendoza@tec.mx',
-        role: 'teacher',
-        fullName: 'Prof. Mendoza Morales',
-        createdAt: Date.now()
-      }
-      setCurrentUser(teacherProfile)
-      localStorage.setItem('automatarium_tec_session', JSON.stringify(teacherProfile))
-    } else {
-      const studentProfile: UserProfile = {
-        uid: 'student_21280145',
-        email: '21280145@tec.edu.mx',
-        role: 'student',
-        fullName: 'García Hernández Juan',
-        controlNumber: '21280145',
-        mustChangePassword: false,
-        createdAt: Date.now()
-      }
-      setCurrentUser(studentProfile)
-      localStorage.setItem('automatarium_tec_session', JSON.stringify(studentProfile))
-    }
-  }
 
   const handleLoginSuccess = (user: UserProfile) => {
     setCurrentUser(user)
@@ -338,16 +299,14 @@ export const App: React.FC = () => {
       {/* Barra de navegación global estilo Automatarium */}
       <Navbar
         currentUser={currentUser}
-        currentRole={currentRole}
-        onRoleChange={handleRoleChange}
         onLogout={handleLogout}
         onOpenAbout={() => setIsAboutOpen(true)}
         pendingSyncCount={submissions.filter(s => s.isDirtyLocally).length}
       />
 
-      {/* Contenido dinámico según el rol */}
+      {/* Contenido dinámico según el rol autenticado */}
       <main style={{ flex: 1 }}>
-        {currentRole === 'teacher' ? (
+        {currentUser.role === 'teacher' ? (
           <TeacherDashboard
             groups={groups}
             activities={activities}

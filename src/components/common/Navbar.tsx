@@ -16,12 +16,10 @@ import {
   User,
   LogOut
 } from 'lucide-react'
-import { UserRole, UserProfile } from '../../types/academic'
+import { UserProfile } from '../../types/academic'
 
 interface NavbarProps {
   currentUser?: UserProfile | null
-  currentRole: UserRole
-  onRoleChange: (role: UserRole) => void
   onLogout?: () => void
   onOpenAbout: () => void
   pendingSyncCount?: number
@@ -29,8 +27,6 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
-  currentRole,
-  onRoleChange,
   onLogout,
   onOpenAbout,
   pendingSyncCount = 0
@@ -159,43 +155,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         )}
 
-        {/* Conmutador de Rol para Pruebas */}
-        <div style={{
-          display: 'flex',
-          background: '#222222',
-          padding: 2,
-          borderRadius: 'var(--radius-sm)',
-          border: '1px solid #383838'
-        }}>
-          <button
-            type="button"
-            className={`btn btn-sm ${currentRole === 'teacher' ? 'btn-primary' : ''}`}
-            style={{
-              padding: '3px 8px',
-              fontSize: '0.75rem',
-              background: currentRole === 'teacher' ? undefined : 'transparent',
-              border: 'none'
-            }}
-            onClick={() => onRoleChange('teacher')}
-          >
-            <GraduationCap size={13} /> Profesor
-          </button>
-          <button
-            type="button"
-            className={`btn btn-sm ${currentRole === 'student' ? 'btn-primary' : ''}`}
-            style={{
-              padding: '3px 8px',
-              fontSize: '0.75rem',
-              background: currentRole === 'student' ? undefined : 'transparent',
-              border: 'none'
-            }}
-            onClick={() => onRoleChange('student')}
-          >
-            <User size={13} /> Alumno
-          </button>
-        </div>
-
-        {/* Usuario Activo */}
+        {/* Perfil del Usuario Activo */}
         {currentUser && (
           <div style={{
             display: 'flex',
@@ -207,11 +167,20 @@ export const Navbar: React.FC<NavbarProps> = ({
             border: '1px solid #383838',
             fontSize: '0.775rem'
           }}>
-            {currentUser.role === 'teacher' ? (
-              <GraduationCap size={14} color="var(--primary)" />
-            ) : (
-              <User size={14} color="var(--primary)" />
-            )}
+            <span 
+              className={`badge ${currentUser.role === 'teacher' ? 'badge-afd' : 'badge-lexer'}`}
+              style={{ fontSize: '0.68rem', padding: '2px 7px', display: 'flex', alignItems: 'center', gap: 4 }}
+            >
+              {currentUser.role === 'teacher' ? (
+                <>
+                  <GraduationCap size={12} /> Docente
+                </>
+              ) : (
+                <>
+                  <User size={12} /> Alumno
+                </>
+              )}
+            </span>
             <span style={{ fontWeight: 600 }}>{currentUser.fullName}</span>
             {currentUser.controlNumber && (
               <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
