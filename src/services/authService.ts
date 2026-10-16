@@ -149,39 +149,59 @@ export const loginTeacher = async (
     try {
       const userCred = await signInWithEmailAndPassword(auth, cleanEmail, password)
       const customTeacherName = localStorage.getItem('automatarium_teacher_custom_name')
+      
+      // Formatear nombre a partir del correo si no hay nombre personalizado o displayName
+      const emailPrefix = cleanEmail.split('@')[0]
+      const formattedEmailName = emailPrefix
+        .split(/[._-]/)
+        .filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ')
+      
+      const teacherName = customTeacherName || userCred.user.displayName || (formattedEmailName ? `Prof. ${formattedEmailName}` : 'Profesor Titular')
+
       const profile: UserProfile = {
         uid: userCred.user.uid,
         email: userCred.user.email || cleanEmail,
         role: 'teacher',
-        fullName: customTeacherName || userCred.user.displayName || (cleanEmail.includes('mendoza') ? 'Prof. Mendoza Morales' : 'Profesor Titular'),
+        fullName: teacherName,
         createdAt: Date.now()
       }
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(profile))
       return profile
     } catch (err: any) {
-      console.warn('Firebase teacher auth falló:', err.message)
-      if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
-        throw new Error('Credenciales inválidas de profesor en Firebase.')
+      console.warn('Firebase teacher auth falló:', err.code, err.message)
+      if (
+        err.code === 'auth/invalid-credential' ||
+        err.code === 'auth/user-not-found' ||
+        err.code === 'auth/wrong-password' ||
+        err.code === 'auth/invalid-email'
+      ) {
+        throw new Error('El correo o la contraseña no coinciden con los registrados en Firebase.')
+      } else if (err.code === 'auth/too-many-requests') {
+        throw new Error('Demasiados intentos fallidos. Por favor espera unos momentos e intenta de nuevo.')
+      } else if (err.code === 'auth/user-disabled') {
+        throw new Error('Esta cuenta de docente ha sido deshabilitada en Firebase.')
       }
+      // Si fue error de red/servidor y el usuario usa el usuario de prueba offline
     }
   }
 
-  // Validación local / modo offline para pruebas
-  if (password.length < 4) {
-    throw new Error('La contraseña debe tener al menos 4 caracteres.')
+  // Validación local / modo offline de contingencia
+  if (cleanEmail === 'prof_mendoza@tec.mx' && (password === 'tec12345' || password.length >= 4)) {
+    const customTeacherName = localStorage.getItem('automatarium_teacher_custom_name')
+    const profile: UserProfile = {
+      uid: 'prof_mendoza',
+      email: cleanEmail,
+      role: 'teacher',
+      fullName: customTeacherName || 'Prof. Mendoza Morales',
+      createdAt: Date.now()
+    }
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(profile))
+    return profile
   }
 
-  const customTeacherName = localStorage.getItem('automatarium_teacher_custom_name')
-  const profile: UserProfile = {
-    uid: 'prof_mendoza',
-    email: cleanEmail,
-    role: 'teacher',
-    fullName: customTeacherName || (cleanEmail.includes('mendoza') ? 'Prof. Mendoza Morales' : 'Profesor Titular'),
-    createdAt: Date.now()
-  }
-
-  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(profile))
-  return profile
+  throw new Error('Credenciales incorrectas o usuario no registrado en Firebase.')
 }
 
 /**
