@@ -24,6 +24,7 @@ import {
   syncSaveInvitation,
   syncSaveStudentPreference,
   fetchStudentPreference,
+  fetchStudentSubmission,
   fetchSubmissionDoc,
   subscribeToSubmissionDoc
 } from '../../services/academicFirestoreService'
@@ -109,6 +110,10 @@ export const StudentView: React.FC<StudentViewProps> = ({
   const [activeSimulationState, setActiveSimulationState] = useState<number | null>(null)
   const [saveStatusMessage, setSaveStatusMessage] = useState<string | null>(null)
 
+  // Referencias para control de auto-guardado inteligente sin sobreescrituras accidentales
+  const isDraftLoadedRef = useRef<boolean>(false)
+  const lastSavedGraphRef = useRef<string>('')
+
   // Estado para gestión de conflictos de concurrencia en equipo
   const [conflictData, setConflictData] = useState<{
     localGraph: AutomataGraph
@@ -124,13 +129,28 @@ export const StudentView: React.FC<StudentViewProps> = ({
 
     const soloKey = `solo_${selectedActivity.id}_${studentControlNumber}`
     const isSoloLocal = localStorage.getItem(soloKey) === 'true'
-    setIsSoloMode(isSoloLocal)
+    if (isSoloLocal) {
+      setIsSoloMode(true)
+    }
 
     // Cargar preferencia remota (para recordar en cualquier navegador o equipo si eligió trabajar individual)
     fetchStudentPreference(selectedActivity.id, studentControlNumber).then(cloudSolo => {
       if (cloudSolo !== null) {
         setIsSoloMode(cloudSolo)
         localStorage.setItem(soloKey, cloudSolo ? 'true' : 'false')
+      } else {
+        // Si no hay preferencia explícita en settings, verificar si ya tiene entrega registrada en la nube
+        fetchStudentSubmission(selectedActivity.id, studentControlNumber).then(sub => {
+          if (sub) {
+            if (sub.isTeamSubmission && sub.teamId) {
+              setIsSoloMode(false)
+            } else {
+              setIsSoloMode(true)
+              localStorage.setItem(soloKey, 'true')
+              syncSaveStudentPreference(selectedActivity.id, studentControlNumber, true).catch(() => {})
+            }
+          }
+        })
       }
     })
 
@@ -165,23 +185,25 @@ export const StudentView: React.FC<StudentViewProps> = ({
     if (!currentExercise || !selectedActivity) return
 
     const loadDraft = async () => {
+      isDraftLoadedRef.current = false
+
       const storageKey = isTeam && teamId
         ? `${teamId}_${currentExercise.id}`
         : `${selectedActivity.id}_${currentExercise.id}`
-      
-      const submissionId = isTeam && teamId
-        ? teamId
-        : `${selectedActivity.id}_${studentControlNumber}`
 
       // A. Cargar borrador local si existe
       const existingDraft = await localDB.drafts.get(storageKey)
       if (existingDraft?.graph) {
         setCurrentGraph(existingDraft.graph)
+        lastSavedGraphRef.current = JSON.stringify(existingDraft.graph)
       }
 
       // B. Consultar versión en la nube (Firestore) para persistencia multi-dispositivo y trabajo en equipo
       try {
-        const cloudSub = await fetchSubmissionDoc(submissionId)
+        const cloudSub = isTeam && teamId
+          ? await fetchSubmissionDoc(teamId)
+          : await fetchStudentSubmission(selectedActivity.id, studentControlNumber)
+
         if (cloudSub) {
           const rawCandidate = cloudSub.exerciseSubmissions?.[currentExercise.id]?.graph ||
                                (cloudSub.exerciseSubmissions?.[currentExercise.id] as any)?.diagram ||
@@ -194,12 +216,14 @@ export const StudentView: React.FC<StudentViewProps> = ({
 
           if (cloudGraph && cloudGraph.states && cloudGraph.states.length > 0) {
             const localHasStates = existingDraft?.graph?.states && existingDraft.graph.states.length > 0
-            const cloudTimestamp = cloudSub.lastSyncedAt || cloudSub.submittedAt || 0
+            const cloudTimestamp = cloudSub.lastSyncedAt || (typeof (cloudSub as any).updatedAt === 'number' ? (cloudSub as any).updatedAt : 0) || cloudSub.submittedAt || 0
             const localTimestamp = existingDraft?.updatedAt || 0
 
-            // Si local no tiene estados o la nube es más reciente
+            // Si local no tiene estados o la nube es igual o más reciente
             if (!localHasStates || cloudTimestamp >= localTimestamp) {
               setCurrentGraph(cloudGraph)
+              lastSavedGraphRef.current = JSON.stringify(cloudGraph)
+              setLastEditedByInfo(cloudSub.lastEditedBy?.fullName ? `Última edición por ${cloudSub.lastEditedBy.fullName}` : 'Sincronizado con la nube')
               await localDB.drafts.put({
                 id: storageKey,
                 activityId: selectedActivity.id,
@@ -213,7 +237,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
           }
         } else if (!existingDraft) {
           // Plantilla inicial si no hay borrador local ni en la nube
-          setCurrentGraph({
+          const defaultTemplate: AutomataGraph = {
             projectType: currentExercise.type === 'LEXER_DIAGRAM' ? 'LEXER_DIAGRAM' : 'AFD',
             states: [
               { id: 0, name: 'q0', x: 140, y: 160, isFinal: false },
@@ -223,10 +247,14 @@ export const StudentView: React.FC<StudentViewProps> = ({
               { id: 1, from: 0, to: 1, read: currentExercise.type === 'LEXER_DIAGRAM' ? '[a-zA-Z]' : '0' }
             ],
             initialState: 0
-          })
+          }
+          setCurrentGraph(defaultTemplate)
+          lastSavedGraphRef.current = JSON.stringify(defaultTemplate)
         }
       } catch (err) {
         console.warn('Error al consultar borrador en Firestore:', err)
+      } finally {
+        isDraftLoadedRef.current = true
       }
     }
 
@@ -248,14 +276,23 @@ export const StudentView: React.FC<StudentViewProps> = ({
         const remoteGraph = normalizeAutomataGraph(rawRemote, currentExercise.type === 'LEXER_DIAGRAM' ? 'LEXER_DIAGRAM' : 'AFD')
 
         if (remoteGraph && !areGraphsEqual(currentGraph, remoteGraph)) {
-          // Si el alumno no ha realizado modificaciones locales respecto al borrador guardado, se sincroniza automáticamente
-          setConflictData({
-            localGraph: currentGraph,
-            remoteGraph,
-            remoteAuthorName: cloudSub.lastEditedBy?.fullName || 'Tu compañero',
-            remoteTimestamp: cloudSub.lastEditedBy?.timestamp || cloudSub.lastSyncedAt,
-            remoteSubmission: cloudSub
-          })
+          // Si el alumno no ha realizado modificaciones locales pendientes respecto a su última carga/guardado:
+          if (JSON.stringify(currentGraph) === lastSavedGraphRef.current) {
+            setCurrentGraph(remoteGraph)
+            lastSavedGraphRef.current = JSON.stringify(remoteGraph)
+            setLastEditedByInfo(`Compañero: ${cloudSub.lastEditedBy?.fullName || 'Equipo'}`)
+            setSaveStatusMessage(`Avance sincronizado de ${cloudSub.lastEditedBy?.fullName || 'tu compañero'}`)
+            setTimeout(() => setSaveStatusMessage(null), 3000)
+          } else {
+            // Si el alumno tiene cambios locales propios: mostrar modal de resolución de conflictos
+            setConflictData({
+              localGraph: currentGraph,
+              remoteGraph,
+              remoteAuthorName: cloudSub.lastEditedBy?.fullName || 'Tu compañero',
+              remoteTimestamp: cloudSub.lastEditedBy?.timestamp || cloudSub.lastSyncedAt,
+              remoteSubmission: cloudSub
+            })
+          }
         }
       }
     })
@@ -318,6 +355,9 @@ export const StudentView: React.FC<StudentViewProps> = ({
       ? `${teamId}_${currentExercise.id}`
       : `${selectedActivity.id}_${currentExercise.id}`
 
+    // Actualizar referencia de último grafo guardado
+    lastSavedGraphRef.current = JSON.stringify(currentGraph)
+
     await localDB.drafts.put({
       id: storageKey,
       activityId: selectedActivity.id,
@@ -333,9 +373,15 @@ export const StudentView: React.FC<StudentViewProps> = ({
     setTimeout(() => setSaveStatusMessage(null), 3000)
 
     try {
-      const submissionId = isTeam && teamId
+      const defaultSubId = isTeam && teamId
         ? teamId
-        : `${selectedActivity.id}_${studentControlNumber}`
+        : `sub_${studentControlNumber}_${selectedActivity.id}`
+
+      // Buscar si ya existía un documento previo para este alumno o equipo para no duplicar ni perder histórico
+      const existingSub = await localDB.cachedSubmissions.get(defaultSubId) ||
+                          (isTeam && teamId ? await fetchSubmissionDoc(teamId) : await fetchStudentSubmission(selectedActivity.id, studentControlNumber))
+
+      const submissionId = existingSub?.id || defaultSubId
 
       let testsPassed = 0
       let testsTotal = currentExercise.testCases.length
@@ -349,7 +395,6 @@ export const StudentView: React.FC<StudentViewProps> = ({
         testsTotal = results.totalCount
       }
 
-      const existingSub = await localDB.cachedSubmissions.get(submissionId)
       const exerciseSubs = existingSub?.exerciseSubmissions || {}
       
       const currentOverallStatus = existingSub?.overallStatus === 'submitted' || existingSub?.overallStatus === 'graded'
@@ -404,13 +449,14 @@ export const StudentView: React.FC<StudentViewProps> = ({
   }
 
   // 6. Auto-guardado inteligente (debounced 1.5s) al modificar el diagrama en el lienzo
-  const isInitialMount = useRef(true)
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false
+    if (!isDraftLoadedRef.current) return
+    if (!selectedActivity || !currentExercise) return
+
+    // Evitar sobreescrituras si el diagrama es exactamente igual al último cargado o guardado
+    if (JSON.stringify(currentGraph) === lastSavedGraphRef.current) {
       return
     }
-    if (!selectedActivity || !currentExercise) return
 
     const timer = setTimeout(() => {
       handleSaveDraftOffline()
@@ -597,13 +643,13 @@ export const StudentView: React.FC<StudentViewProps> = ({
 
   const handleRejectInvitation = async (invitationId: string) => {
     await localDB.invitations.delete(invitationId)
-    await syncDeleteInvitation(invitationId)
+    await syncDeleteInvitation(invitationId, selectedActivity?.id)
     setInvitationsReceived(prev => prev.filter(i => i.id !== invitationId))
   }
 
   const handleCancelInvitation = async (invitationId: string) => {
     await localDB.invitations.delete(invitationId)
-    await syncDeleteInvitation(invitationId)
+    await syncDeleteInvitation(invitationId, selectedActivity?.id)
     setInvitationsSent(prev => prev.filter(i => i.id !== invitationId))
   }
 
@@ -700,6 +746,9 @@ export const StudentView: React.FC<StudentViewProps> = ({
                   style={{ padding: '1px 6px', fontSize: '0.675rem' }}
                   onClick={() => {
                     localStorage.removeItem(`solo_${selectedActivity?.id}_${studentControlNumber}`)
+                    if (selectedActivity) {
+                      syncSaveStudentPreference(selectedActivity.id, studentControlNumber, false).catch(() => {})
+                    }
                     setIsSoloMode(false)
                   }}
                   title="Cambiar a conformación de equipo"

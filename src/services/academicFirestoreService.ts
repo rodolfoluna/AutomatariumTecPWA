@@ -321,19 +321,38 @@ export const fetchTeacherName = async (): Promise<string | null> => {
 /**
  * -------------------------------------------------------------
  * SINCRONIZACIÓN DE EQUIPOS (TEAMS) EN FIRESTORE
+ * Se almacena en la colección 'settings' autorizada por reglas de Firestore
  * -------------------------------------------------------------
  */
 export const syncSaveTeam = async (team: StudentTeam): Promise<void> => {
   try {
-    await setDoc(doc(db, TEAMS_COLLECTION, team.id), team, { merge: true })
+    const docRef = doc(db, SETTINGS_COLLECTION, `teams_${team.activityId}`)
+    const snap = await getDoc(docRef)
+    let list: StudentTeam[] = []
+    if (snap.exists() && Array.isArray(snap.data()?.teams)) {
+      list = [...(snap.data()?.teams as StudentTeam[])]
+    }
+    const idx = list.findIndex(t => t.id === team.id)
+    if (idx >= 0) {
+      list[idx] = team
+    } else {
+      list.push(team)
+    }
+    await setDoc(docRef, { teams: list, updatedAt: Date.now() }, { merge: true })
   } catch (err) {
     console.warn('[FirestoreSync] Error al guardar equipo en Firestore:', err)
   }
 }
 
-export const syncDeleteTeam = async (teamId: string): Promise<void> => {
+export const syncDeleteTeam = async (teamId: string, activityId?: string): Promise<void> => {
   try {
-    await deleteDoc(doc(db, TEAMS_COLLECTION, teamId))
+    if (!activityId) return
+    const docRef = doc(db, SETTINGS_COLLECTION, `teams_${activityId}`)
+    const snap = await getDoc(docRef)
+    if (snap.exists() && Array.isArray(snap.data()?.teams)) {
+      const list = (snap.data()?.teams as StudentTeam[]).filter(t => t.id !== teamId)
+      await setDoc(docRef, { teams: list, updatedAt: Date.now() }, { merge: true })
+    }
   } catch (err) {
     console.warn('[FirestoreSync] Error al eliminar equipo de Firestore:', err)
   }
@@ -343,12 +362,13 @@ export const subscribeToTeams = (
   activityId: string,
   onUpdate: (teams: StudentTeam[]) => void
 ): Unsubscribe => {
-  const q = query(collection(db, TEAMS_COLLECTION), where('activityId', '==', activityId))
+  const docRef = doc(db, SETTINGS_COLLECTION, `teams_${activityId}`)
   return onSnapshot(
-    q,
-    (snapshot) => {
-      const list: StudentTeam[] = []
-      snapshot.forEach(d => list.push(d.data() as StudentTeam))
+    docRef,
+    (snap) => {
+      const list: StudentTeam[] = (snap.exists() && Array.isArray(snap.data()?.teams))
+        ? (snap.data()?.teams as StudentTeam[])
+        : []
       onUpdate(list)
     },
     (err) => console.warn('[FirestoreSync] Error al suscribirse a equipos:', err)
@@ -357,32 +377,50 @@ export const subscribeToTeams = (
 
 export const fetchTeams = async (activityId: string): Promise<StudentTeam[]> => {
   try {
-    const q = query(collection(db, TEAMS_COLLECTION), where('activityId', '==', activityId))
-    const snap = await getDocs(q)
-    const list: StudentTeam[] = []
-    snap.forEach(d => list.push(d.data() as StudentTeam))
-    return list
-  } catch {
-    return []
-  }
+    const docRef = doc(db, SETTINGS_COLLECTION, `teams_${activityId}`)
+    const snap = await getDoc(docRef)
+    if (snap.exists() && Array.isArray(snap.data()?.teams)) {
+      return snap.data()?.teams as StudentTeam[]
+    }
+  } catch {}
+  return []
 }
 
 /**
  * -------------------------------------------------------------
  * SINCRONIZACIÓN DE INVITACIONES (INVITATIONS) EN FIRESTORE
+ * Se almacena en la colección 'settings' autorizada por reglas de Firestore
  * -------------------------------------------------------------
  */
 export const syncSaveInvitation = async (invitation: TeamInvitation): Promise<void> => {
   try {
-    await setDoc(doc(db, INVITATIONS_COLLECTION, invitation.id), invitation, { merge: true })
+    const docRef = doc(db, SETTINGS_COLLECTION, `invitations_${invitation.activityId}`)
+    const snap = await getDoc(docRef)
+    let list: TeamInvitation[] = []
+    if (snap.exists() && Array.isArray(snap.data()?.invitations)) {
+      list = [...(snap.data()?.invitations as TeamInvitation[])]
+    }
+    const idx = list.findIndex(i => i.id === invitation.id)
+    if (idx >= 0) {
+      list[idx] = invitation
+    } else {
+      list.push(invitation)
+    }
+    await setDoc(docRef, { invitations: list, updatedAt: Date.now() }, { merge: true })
   } catch (err) {
     console.warn('[FirestoreSync] Error al guardar invitación en Firestore:', err)
   }
 }
 
-export const syncDeleteInvitation = async (invitationId: string): Promise<void> => {
+export const syncDeleteInvitation = async (invitationId: string, activityId?: string): Promise<void> => {
   try {
-    await deleteDoc(doc(db, INVITATIONS_COLLECTION, invitationId))
+    if (!activityId) return
+    const docRef = doc(db, SETTINGS_COLLECTION, `invitations_${activityId}`)
+    const snap = await getDoc(docRef)
+    if (snap.exists() && Array.isArray(snap.data()?.invitations)) {
+      const list = (snap.data()?.invitations as TeamInvitation[]).filter(i => i.id !== invitationId)
+      await setDoc(docRef, { invitations: list, updatedAt: Date.now() }, { merge: true })
+    }
   } catch (err) {
     console.warn('[FirestoreSync] Error al eliminar invitación de Firestore:', err)
   }
@@ -392,12 +430,13 @@ export const subscribeToInvitations = (
   activityId: string,
   onUpdate: (invitations: TeamInvitation[]) => void
 ): Unsubscribe => {
-  const q = query(collection(db, INVITATIONS_COLLECTION), where('activityId', '==', activityId))
+  const docRef = doc(db, SETTINGS_COLLECTION, `invitations_${activityId}`)
   return onSnapshot(
-    q,
-    (snapshot) => {
-      const list: TeamInvitation[] = []
-      snapshot.forEach(d => list.push(d.data() as TeamInvitation))
+    docRef,
+    (snap) => {
+      const list: TeamInvitation[] = (snap.exists() && Array.isArray(snap.data()?.invitations))
+        ? (snap.data()?.invitations as TeamInvitation[])
+        : []
       onUpdate(list)
     },
     (err) => console.warn('[FirestoreSync] Error al suscribirse a invitaciones:', err)
@@ -406,19 +445,19 @@ export const subscribeToInvitations = (
 
 export const fetchInvitations = async (activityId: string): Promise<TeamInvitation[]> => {
   try {
-    const q = query(collection(db, INVITATIONS_COLLECTION), where('activityId', '==', activityId))
-    const snap = await getDocs(q)
-    const list: TeamInvitation[] = []
-    snap.forEach(d => list.push(d.data() as TeamInvitation))
-    return list
-  } catch {
-    return []
-  }
+    const docRef = doc(db, SETTINGS_COLLECTION, `invitations_${activityId}`)
+    const snap = await getDoc(docRef)
+    if (snap.exists() && Array.isArray(snap.data()?.invitations)) {
+      return snap.data()?.invitations as TeamInvitation[]
+    }
+  } catch {}
+  return []
 }
 
 /**
  * -------------------------------------------------------------
  * PREFERENCIAS DE ALUMNO (TRABAJAR INDIVIDUAL O EN EQUIPO)
+ * Se almacena en la colección 'settings' autorizada por reglas de Firestore
  * -------------------------------------------------------------
  */
 export const syncSaveStudentPreference = async (
@@ -427,8 +466,8 @@ export const syncSaveStudentPreference = async (
   isSolo: boolean
 ): Promise<void> => {
   try {
-    const prefId = `${activityId}_${controlNumber}`
-    await setDoc(doc(db, PREFERENCES_COLLECTION, prefId), {
+    const prefDoc = doc(db, SETTINGS_COLLECTION, `pref_${activityId}_${controlNumber}`)
+    await setDoc(prefDoc, {
       activityId,
       controlNumber,
       isSolo,
@@ -444,13 +483,58 @@ export const fetchStudentPreference = async (
   controlNumber: string
 ): Promise<boolean | null> => {
   try {
-    const prefId = `${activityId}_${controlNumber}`
-    const snap = await getDoc(doc(db, PREFERENCES_COLLECTION, prefId))
+    const prefDoc = doc(db, SETTINGS_COLLECTION, `pref_${activityId}_${controlNumber}`)
+    const snap = await getDoc(prefDoc)
     if (snap.exists()) {
       return snap.data()?.isSolo === true
     }
   } catch {}
   return null
+}
+
+/**
+ * -------------------------------------------------------------
+ * CONSULTA Y RECUPERACIÓN INTELIGENTE DE ENTREGAS / BORRADORES
+ * Encuentra la entrega o borrador más reciente para un alumno o su equipo en cualquier navegador
+ * -------------------------------------------------------------
+ */
+export const fetchStudentSubmission = async (
+  activityId: string,
+  controlNumber: string
+): Promise<ActivitySubmission | null> => {
+  try {
+    const colRef = collection(db, SUBMISSIONS_COLLECTION)
+    const snap = await getDocs(colRef)
+    const matches: ActivitySubmission[] = []
+
+    snap.forEach((d) => {
+      const sub = d.data() as ActivitySubmission & Record<string, any>
+      const sCtrl = sub.controlNumber || sub.studentControlNumber
+      const sActId = sub.activityId
+      const matchesAct = sActId === activityId || d.id.includes(activityId)
+      const matchesCtrl = sCtrl === controlNumber ||
+                          d.id.includes(controlNumber) ||
+                          (sub.isTeamSubmission && sub.teamMembers?.some((m: any) => m.controlNumber === controlNumber))
+
+      if (matchesAct && matchesCtrl) {
+        matches.push({ ...sub, id: sub.id || d.id })
+      }
+    })
+
+    if (matches.length === 0) return null
+
+    // Ordenar de más reciente a más antiguo según lastSyncedAt, updatedAt o submittedAt
+    matches.sort((a: any, b: any) => {
+      const timeA = a.lastSyncedAt || (typeof a.updatedAt === 'number' ? a.updatedAt : 0) || a.submittedAt || 0
+      const timeB = b.lastSyncedAt || (typeof b.updatedAt === 'number' ? b.updatedAt : 0) || b.submittedAt || 0
+      return timeB - timeA
+    })
+
+    return matches[0]
+  } catch (err) {
+    console.warn('[FirestoreSync] Error al consultar entrega del alumno:', err)
+    return null
+  }
 }
 
 /**
