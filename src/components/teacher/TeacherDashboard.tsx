@@ -31,7 +31,11 @@ import {
   MessageSquare,
   KeyRound,
   RotateCcw,
-  Copy
+  Copy,
+  Filter,
+  Clock,
+  BarChart2,
+  AlertCircle
 } from 'lucide-react'
 
 interface TeacherDashboardProps {
@@ -174,6 +178,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       setResetModal(prev => ({ ...prev, copied: false }))
     }, 2500)
   }
+
+  // Filtros para el Monitor de Avance de Alumnos
+  const [progressFilterGroupId, setProgressFilterGroupId] = useState<string>('all')
+  const [progressFilterActivityId, setProgressFilterActivityId] = useState<string>('all')
+  const [progressStatusFilter, setProgressStatusFilter] = useState<'all' | 'not_started' | 'draft' | 'submitted' | 'graded'>('all')
+  const [progressSearchTerm, setProgressSearchTerm] = useState('')
 
   // Estado para creación o edición de actividad
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null)
@@ -562,7 +572,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           className={`btn ${activeTab === 'submissions' ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => setActiveTab('submissions')}
         >
-          <CheckCircle size={15} /> Entregas ({submissions.length})
+          <BarChart2 size={15} /> Avance de Alumnos y Entregas ({submissions.length})
         </button>
       </div>
 
@@ -912,90 +922,440 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         </div>
       )}
 
-      {/* 3. SECCIÓN DE ENTREGAS */}
-      {activeTab === 'submissions' && (
-        <div className="automatarium-card" style={{ padding: 20 }}>
-          <h3 style={{ fontSize: '1.05rem', marginBottom: 14, fontFamily: 'var(--font-header)' }}>
-            Entregas Registradas
-          </h3>
-          {submissions.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
-              No hay entregas registradas aún.
+      {/* 3. SECCIÓN DE AVANCE Y ENTREGAS DE ALUMNOS */}
+      {activeTab === 'submissions' && (() => {
+        // 1. Filtrar actividades según selección
+        const activitiesToMonitor = progressFilterActivityId === 'all'
+          ? activities
+          : activities.filter(a => a.id === progressFilterActivityId)
+
+        // 2. Determinar los grupos involucrados
+        const groupsToMonitor = progressFilterGroupId === 'all'
+          ? groups
+          : groups.filter(g => g.id === progressFilterGroupId)
+
+        // 3. Matriz de alumnos y avances
+        interface StudentProgressRow {
+          key: string
+          controlNumber: string
+          studentName: string
+          groupName: string
+          activityTitle: string
+          activityId: string
+          isTeam: boolean
+          teamName?: string
+          teamMembers?: Array<{ controlNumber: string; fullName: string }>
+          status: 'not_started' | 'draft' | 'submitted' | 'graded'
+          testsPassed: number
+          testsTotal: number
+          grade?: number
+          submission?: ActivitySubmission
+          updatedAt?: number
+        }
+
+        const progressRows: StudentProgressRow[] = []
+
+        groupsToMonitor.forEach(group => {
+          group.studentControlNumbers.forEach(ctrl => {
+            const studentName = studentDirectory[ctrl]?.fullName || `Alumno [${ctrl}]`
+
+            activitiesToMonitor
+              .filter(act => act.groupIds.includes(group.id))
+              .forEach(act => {
+                const sub = submissions.find(s =>
+                  s.activityId === act.id &&
+                  (s.controlNumber === ctrl || (s.isTeamSubmission && s.teamMembers?.some(m => m.controlNumber === ctrl)))
+                )
+
+                let testsPassed = 0
+                let testsTotal = 0
+                if (sub?.exerciseSubmissions) {
+                  Object.values(sub.exerciseSubmissions).forEach(es => {
+                    testsPassed += es.testsPassed || 0
+                    testsTotal += es.testsTotal || 0
+                  })
+                } else {
+                  act.exercises.forEach(ex => {
+                    testsTotal += ex.testCases.length
+                  })
+                }
+
+                const status: 'not_started' | 'draft' | 'submitted' | 'graded' = sub ? sub.overallStatus : 'not_started'
+
+                progressRows.push({
+                  key: `${act.id}_${ctrl}`,
+                  controlNumber: ctrl,
+                  studentName,
+                  groupName: group.name,
+                  activityTitle: act.title,
+                  activityId: act.id,
+                  isTeam: !!act.isTeamActivity,
+                  teamName: sub?.teamName,
+                  teamMembers: sub?.teamMembers,
+                  status,
+                  testsPassed,
+                  testsTotal,
+                  grade: sub?.grade,
+                  submission: sub,
+                  updatedAt: sub?.submittedAt || sub?.lastSyncedAt
+                })
+              })
+          })
+        })
+
+        // Filtrar filas según filtros de estado y búsqueda
+        const filteredRows = progressRows.filter(row => {
+          if (progressStatusFilter !== 'all' && row.status !== progressStatusFilter) {
+            return false
+          }
+          if (progressSearchTerm.trim()) {
+            const term = progressSearchTerm.toLowerCase()
+            const matchesName = row.studentName.toLowerCase().includes(term)
+            const matchesCtrl = row.controlNumber.toLowerCase().includes(term)
+            const matchesTeam = row.teamName?.toLowerCase().includes(term)
+            const matchesAct = row.activityTitle.toLowerCase().includes(term)
+            if (!matchesName && !matchesCtrl && !matchesTeam && !matchesAct) return false
+          }
+          return true
+        })
+
+        // Métricas / KPIs
+        const totalRows = progressRows.length
+        const countNotStarted = progressRows.filter(r => r.status === 'not_started').length
+        const countDraft = progressRows.filter(r => r.status === 'draft').length
+        const countSubmitted = progressRows.filter(r => r.status === 'submitted').length
+        const countGraded = progressRows.filter(r => r.status === 'graded').length
+
+        const gradedRowsWithScores = progressRows.filter(r => r.status === 'graded' && r.grade !== undefined)
+        const avgGrade = gradedRowsWithScores.length > 0
+          ? Math.round(gradedRowsWithScores.reduce((acc, r) => acc + (r.grade || 0), 0) / gradedRowsWithScores.length)
+          : null
+
+        const pctNotStarted = totalRows > 0 ? Math.round((countNotStarted / totalRows) * 100) : 0
+        const pctDraft = totalRows > 0 ? Math.round((countDraft / totalRows) * 100) : 0
+        const pctSubmitted = totalRows > 0 ? Math.round((countSubmitted / totalRows) * 100) : 0
+        const pctGraded = totalRows > 0 ? Math.round((countGraded / totalRows) * 100) : 0
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            {/* 1. Tarjetas de Métricas / KPIs de Avance */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
+              <div className="automatarium-card" style={{ padding: '14px 16px' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                  Total Asignaciones
+                </div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 700, fontFamily: 'var(--font-header)', marginTop: 4, color: 'var(--white)' }}>
+                  {totalRows}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', marginTop: 2 }}>
+                  Alumnos monitoreados
+                </div>
+              </div>
+
+              <div className="automatarium-card" style={{ padding: '14px 16px', borderLeft: '3px solid #64748B' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                  ⚪ Sin Iniciar
+                </div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 700, fontFamily: 'var(--font-header)', marginTop: 4, color: '#94A3B8' }}>
+                  {countNotStarted} <span style={{ fontSize: '0.85rem', fontWeight: 400 }}>({pctNotStarted}%)</span>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', marginTop: 2 }}>
+                  Aún no abren la actividad
+                </div>
+              </div>
+
+              <div className="automatarium-card" style={{ padding: '14px 16px', borderLeft: '3px solid #F59E0B' }}>
+                <div style={{ fontSize: '0.75rem', color: '#FCD34D', textTransform: 'uppercase', fontWeight: 600 }}>
+                  🟡 En Progreso (Borrador)
+                </div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 700, fontFamily: 'var(--font-header)', marginTop: 4, color: '#FBBF24' }}>
+                  {countDraft} <span style={{ fontSize: '0.85rem', fontWeight: 400 }}>({pctDraft}%)</span>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', marginTop: 2 }}>
+                  Construyendo diagramas
+                </div>
+              </div>
+
+              <div className="automatarium-card" style={{ padding: '14px 16px', borderLeft: '3px solid #38BDF8' }}>
+                <div style={{ fontSize: '0.75rem', color: '#7DD3FC', textTransform: 'uppercase', fontWeight: 600 }}>
+                  🔵 Entregados
+                </div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 700, fontFamily: 'var(--font-header)', marginTop: 4, color: '#38BDF8' }}>
+                  {countSubmitted} <span style={{ fontSize: '0.85rem', fontWeight: 400 }}>({pctSubmitted}%)</span>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', marginTop: 2 }}>
+                  Pendientes de calificación
+                </div>
+              </div>
+
+              <div className="automatarium-card" style={{ padding: '14px 16px', borderLeft: '3px solid #10B981' }}>
+                <div style={{ fontSize: '0.75rem', color: '#6EE7B7', textTransform: 'uppercase', fontWeight: 600 }}>
+                  🟢 Calificados
+                </div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 700, fontFamily: 'var(--font-header)', marginTop: 4, color: '#34D399' }}>
+                  {countGraded} <span style={{ fontSize: '0.85rem', fontWeight: 400 }}>({pctGraded}%)</span>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', marginTop: 2 }}>
+                  {avgGrade !== null ? `Promedio: ${avgGrade}/100` : 'Sin calificaciones'}
+                </div>
+              </div>
             </div>
-          ) : (
-            <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: '#1B1B1B', textAlign: 'left' }}>
-                  <th style={{ padding: '8px 12px' }}>Modalidad</th>
-                  <th style={{ padding: '8px 12px' }}>Alumno(s) / Equipo</th>
-                  <th style={{ padding: '8px 12px' }}>No. Control</th>
-                  <th style={{ padding: '8px 12px' }}>Estado</th>
-                  <th style={{ padding: '8px 12px' }}>Calificación</th>
-                  <th style={{ padding: '8px 12px' }}>Acciones</th>
-                  <th style={{ padding: '8px 12px' }}>Sincronización</th>
-                </tr>
-              </thead>
-              <tbody>
-                {submissions.map((sub, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid #333' }}>
-                    <td style={{ padding: '8px 12px' }}>
-                      {sub.isTeamSubmission ? (
-                        <span className="badge badge-team">👥 Equipo</span>
-                      ) : (
-                        <span className="badge badge-afd">👤 Indiv.</span>
-                      )}
-                    </td>
-                    <td style={{ padding: '8px 12px' }}>
-                      {sub.isTeamSubmission && sub.teamMembers ? (
-                        <div>
-                          <strong>{sub.teamName || 'Equipo'}</strong>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            {sub.teamMembers.map(m => m.fullName).join(', ')}
-                          </div>
-                        </div>
-                      ) : (
-                        sub.studentName
-                      )}
-                    </td>
-                    <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)' }}>
-                      {sub.isTeamSubmission && sub.teamMembers 
-                        ? sub.teamMembers.map(m => m.controlNumber).join(', ')
-                        : sub.controlNumber}
-                    </td>
-                    <td style={{ padding: '8px 12px' }}>
-                      <span className={`badge ${sub.overallStatus === 'graded' ? 'badge-success' : sub.overallStatus === 'submitted' ? 'badge-lexer' : 'badge-afd'}`}>
-                        {sub.overallStatus === 'graded' ? 'Calificado' : sub.overallStatus === 'submitted' ? 'Entregado' : 'Borrador'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '8px 12px' }}>
-                      {sub.overallStatus === 'graded' && sub.grade !== undefined ? (
-                        <span style={{ fontWeight: 600, color: sub.grade >= 70 ? 'var(--green)' : '#F87171' }}>
-                          {sub.grade} / 100
-                        </span>
-                      ) : (
-                        <span style={{ color: 'var(--text-subtle)' }}>Pendiente</span>
-                      )}
-                    </td>
-                    <td style={{ padding: '8px 12px' }}>
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        style={{ padding: '4px 10px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 5 }}
-                        onClick={() => handleOpenReview(sub)}
-                      >
-                        <Eye size={13} /> Revisar y Calificar
-                      </button>
-                    </td>
-                    <td style={{ padding: '8px 12px', color: 'var(--text-muted)', fontSize: '0.775rem' }}>
-                      {sub.lastSyncedAt ? new Date(sub.lastSyncedAt).toLocaleTimeString() : 'En caché local'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
+
+            {/* 2. Barra de Avance Global Segmentada */}
+            {totalRows > 0 && (
+              <div className="automatarium-card" style={{ padding: '14px 18px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, fontSize: '0.8rem' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    Distribución de Avance del Grupo:
+                  </span>
+                  <span style={{ color: 'var(--text-muted)' }}>
+                    {countGraded + countSubmitted} de {totalRows} terminados ({Math.round(((countGraded + countSubmitted) / totalRows) * 100)}%)
+                  </span>
+                </div>
+                <div style={{ height: 10, width: '100%', background: '#222', borderRadius: 5, overflow: 'hidden', display: 'flex' }}>
+                  <div style={{ width: `${pctGraded}%`, background: '#10B981' }} title={`Calificados: ${countGraded} (${pctGraded}%)`} />
+                  <div style={{ width: `${pctSubmitted}%`, background: '#38BDF8' }} title={`Entregados: ${countSubmitted} (${pctSubmitted}%)`} />
+                  <div style={{ width: `${pctDraft}%`, background: '#F59E0B' }} title={`En progreso: ${countDraft} (${pctDraft}%)`} />
+                  <div style={{ width: `${pctNotStarted}%`, background: '#475569' }} title={`Sin iniciar: ${countNotStarted} (${pctNotStarted}%)`} />
+                </div>
+              </div>
+            )}
+
+            {/* 3. Panel de Filtros y Búsqueda */}
+            <div className="automatarium-card" style={{ padding: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, alignItems: 'center' }}>
+                {/* Filtro Grupo */}
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                    Filtrar por Grupo:
+                  </label>
+                  <select
+                    className="form-select"
+                    value={progressFilterGroupId}
+                    onChange={(e) => setProgressFilterGroupId(e.target.value)}
+                  >
+                    <option value="all">Todos los Grupos ({groups.length})</option>
+                    {groups.map(g => (
+                      <option key={g.id} value={g.id}>{g.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Filtro Actividad */}
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                    Filtrar por Actividad:
+                  </label>
+                  <select
+                    className="form-select"
+                    value={progressFilterActivityId}
+                    onChange={(e) => setProgressFilterActivityId(e.target.value)}
+                  >
+                    <option value="all">Todas las Actividades ({activities.length})</option>
+                    {activities.map(a => (
+                      <option key={a.id} value={a.id}>{a.title}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Búsqueda por Nombre / Control */}
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                    Buscar Alumno o Equipo:
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Nombre o No. Control..."
+                    value={progressSearchTerm}
+                    onChange={(e) => setProgressSearchTerm(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Botones de Filtro por Estado (Pills) */}
+              <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${progressStatusFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: '0.75rem', padding: '3px 10px' }}
+                  onClick={() => setProgressStatusFilter('all')}
+                >
+                  Todos ({progressRows.length})
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${progressStatusFilter === 'not_started' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: '0.75rem', padding: '3px 10px', color: progressStatusFilter === 'not_started' ? undefined : '#94A3B8' }}
+                  onClick={() => setProgressStatusFilter('not_started')}
+                >
+                  ⚪ Sin Iniciar ({countNotStarted})
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${progressStatusFilter === 'draft' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: '0.75rem', padding: '3px 10px', color: progressStatusFilter === 'draft' ? undefined : '#FBBF24' }}
+                  onClick={() => setProgressStatusFilter('draft')}
+                >
+                  🟡 En Progreso ({countDraft})
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${progressStatusFilter === 'submitted' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: '0.75rem', padding: '3px 10px', color: progressStatusFilter === 'submitted' ? undefined : '#38BDF8' }}
+                  onClick={() => setProgressStatusFilter('submitted')}
+                >
+                  🔵 Entregados ({countSubmitted})
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${progressStatusFilter === 'graded' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: '0.75rem', padding: '3px 10px', color: progressStatusFilter === 'graded' ? undefined : '#34D399' }}
+                  onClick={() => setProgressStatusFilter('graded')}
+                >
+                  🟢 Calificados ({countGraded})
+                </button>
+              </div>
+            </div>
+
+            {/* 4. Tabla de Alumnos y Avance Detallado */}
+            <div className="automatarium-card" style={{ padding: 20 }}>
+              <h3 style={{ fontSize: '1.05rem', marginBottom: 14, fontFamily: 'var(--font-header)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Users size={17} color="var(--primary)" /> Avance Detallado por Alumno ({filteredRows.length})
+              </h3>
+
+              {filteredRows.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                  No se encontraron alumnos con los filtros seleccionados.
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: '#1B1B1B', textAlign: 'left', borderBottom: '1px solid #333' }}>
+                        <th style={{ padding: '10px 12px' }}>Alumno(s) / Equipo</th>
+                        <th style={{ padding: '10px 12px' }}>No. Control</th>
+                        <th style={{ padding: '10px 12px' }}>Grupo</th>
+                        <th style={{ padding: '10px 12px' }}>Actividad</th>
+                        <th style={{ padding: '10px 12px' }}>Estado</th>
+                        <th style={{ padding: '10px 12px' }}>Pruebas Superadas</th>
+                        <th style={{ padding: '10px 12px' }}>Calificación</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'center' }}>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredRows.map((row) => (
+                        <tr key={row.key} style={{ borderBottom: '1px solid #282828' }}>
+                          <td style={{ padding: '10px 12px' }}>
+                            {row.isTeam && row.teamMembers ? (
+                              <div>
+                                <span className="badge badge-team" style={{ fontSize: '0.68rem', padding: '2px 6px', marginRight: 6 }}>
+                                  👥 Equipo
+                                </span>
+                                <strong>{row.teamName || 'Equipo'}</strong>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                                  {row.teamMembers.map(m => m.fullName).join(', ')}
+                                </div>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div style={{ width: 26, height: 26, borderRadius: '50%', background: '#303030', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.72rem', fontWeight: 700, color: 'var(--primary)' }}>
+                                  {row.studentName.charAt(0)}
+                                </div>
+                                <span style={{ fontWeight: 600 }}>{row.studentName}</span>
+                              </div>
+                            )}
+                          </td>
+
+                          <td style={{ padding: '10px 12px', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                            {row.isTeam && row.teamMembers
+                              ? row.teamMembers.map(m => m.controlNumber).join(', ')
+                              : row.controlNumber}
+                          </td>
+
+                          <td style={{ padding: '10px 12px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                            {row.groupName}
+                          </td>
+
+                          <td style={{ padding: '10px 12px', fontSize: '0.8rem' }}>
+                            {row.activityTitle}
+                          </td>
+
+                          <td style={{ padding: '10px 12px' }}>
+                            {row.status === 'graded' && (
+                              <span className="badge badge-success">🟢 Calificado</span>
+                            )}
+                            {row.status === 'submitted' && (
+                              <span className="badge badge-lexer">🔵 Entregado</span>
+                            )}
+                            {row.status === 'draft' && (
+                              <span className="badge badge-afd" style={{ background: 'rgba(245, 158, 11, 0.15)', borderColor: 'rgba(245, 158, 11, 0.4)', color: '#FBBF24' }}>
+                                🟡 En Progreso
+                              </span>
+                            )}
+                            {row.status === 'not_started' && (
+                              <span className="badge" style={{ background: '#252525', color: '#94A3B8', border: '1px solid #404040' }}>
+                                ⚪ Sin Iniciar
+                              </span>
+                            )}
+                          </td>
+
+                          <td style={{ padding: '10px 12px' }}>
+                            {row.status === 'not_started' ? (
+                              <span style={{ fontSize: '0.78rem', color: 'var(--text-subtle)' }}>0 / {row.testsTotal}</span>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{
+                                  fontWeight: 600,
+                                  fontSize: '0.8rem',
+                                  color: row.testsPassed === row.testsTotal && row.testsTotal > 0 ? '#34D399' : 'var(--primary)'
+                                }}>
+                                  {row.testsPassed} / {row.testsTotal}
+                                </span>
+                                {row.testsPassed === row.testsTotal && row.testsTotal > 0 && (
+                                  <Check size={13} color="#34D399" />
+                                )}
+                              </div>
+                            )}
+                          </td>
+
+                          <td style={{ padding: '10px 12px' }}>
+                            {row.status === 'graded' && row.grade !== undefined ? (
+                              <span style={{ fontWeight: 700, fontSize: '0.88rem', color: row.grade >= 70 ? 'var(--green)' : '#F87171' }}>
+                                {row.grade} / 100
+                              </span>
+                            ) : (
+                              <span style={{ color: 'var(--text-subtle)', fontSize: '0.75rem' }}>—</span>
+                            )}
+                          </td>
+
+                          <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                            {row.submission ? (
+                              <button
+                                type="button"
+                                className="btn btn-primary btn-sm"
+                                style={{ padding: '4px 10px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                                onClick={() => handleOpenReview(row.submission!)}
+                                title="Abrir y revisar el diagrama modelado por el alumno"
+                              >
+                                <Eye size={13} /> {row.status === 'draft' ? 'Ver Avance' : 'Revisar / Calificar'}
+                              </button>
+                            ) : (
+                              <span style={{ color: 'var(--text-subtle)', fontSize: '0.75rem', fontStyle: 'italic' }}>
+                                Sin diagrama aún
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* MODAL COMPLETO: CREAR / EDITAR ACTIVIDAD Y EJERCICIOS */}
       {(editingActivity || isCreatingNew) && (

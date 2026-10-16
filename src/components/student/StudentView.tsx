@@ -154,7 +154,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
     loadDraft()
   }, [selectedActivity?.id, currentExercise?.id, isTeam, teamId])
 
-  // Guardado de borrador offline
+  // Guardado de borrador offline y sincronización de avance para el docente
   const handleSaveDraftOffline = async () => {
     if (!selectedActivity || !currentExercise) return
 
@@ -175,6 +175,70 @@ export const StudentView: React.FC<StudentViewProps> = ({
     setLastEditedByInfo(`Tú (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`)
     setSaveStatusMessage(isTeam ? 'Borrador del equipo guardado localmente' : 'Borrador guardado localmente')
     setTimeout(() => setSaveStatusMessage(null), 3000)
+
+    // Sincronizar avance en tiempo real para el monitor docente (como borrador activo)
+    try {
+      const submissionId = isTeam && teamId
+        ? teamId
+        : `${selectedActivity.id}_${studentControlNumber}`
+
+      let testsPassed = 0
+      let testsTotal = currentExercise.testCases.length
+      if (currentExercise.type === 'AFD') {
+        const results = runAFDTestSuite(currentGraph, (currentExercise as AFDExercise).testCases)
+        testsPassed = results.passedCount
+        testsTotal = results.totalCount
+      } else {
+        const results = runLexerTestSuite(currentGraph, (currentExercise as LexerExercise).testCases)
+        testsPassed = results.passedCount
+        testsTotal = results.totalCount
+      }
+
+      const existingSub = await localDB.cachedSubmissions.get(submissionId)
+      const exerciseSubs = existingSub?.exerciseSubmissions || {}
+      
+      const currentOverallStatus = existingSub?.overallStatus === 'submitted' || existingSub?.overallStatus === 'graded'
+        ? existingSub.overallStatus
+        : 'draft'
+
+      exerciseSubs[currentExercise.id] = {
+        exerciseId: currentExercise.id,
+        graph: currentGraph,
+        status: currentOverallStatus,
+        testsPassed,
+        testsTotal,
+        score: testsTotal > 0 ? Math.round((testsPassed / testsTotal) * 100) : 0,
+        updatedAt: Date.now()
+      }
+
+      const draftSub: ActivitySubmission = {
+        id: submissionId,
+        activityId: selectedActivity.id,
+        studentUid: `student_${studentControlNumber}`,
+        controlNumber: studentControlNumber,
+        studentName: studentFullName,
+        groupId: selectedActivity.groupIds[0] || 'default_group',
+        overallStatus: currentOverallStatus,
+        submittedAt: existingSub?.submittedAt || Date.now(),
+        isDirtyLocally: !navigator.onLine,
+        isTeamSubmission: isTeam,
+        teamId: isTeam ? teamId : undefined,
+        teamName: isTeam ? `Equipo: ${effectiveTeamMembers.map(m => m.fullName.split(' ')[0]).join(' & ')}` : undefined,
+        teamMembers: isTeam ? effectiveTeamMembers : undefined,
+        lastEditedBy: {
+          controlNumber: studentControlNumber,
+          fullName: studentFullName,
+          timestamp: Date.now()
+        },
+        version: (existingSub?.version || 0) + 1,
+        exerciseSubmissions: exerciseSubs
+      }
+
+      await localDB.cachedSubmissions.put(draftSub)
+      onSubmissionComplete(draftSub)
+    } catch (e) {
+      console.warn('Error al sincronizar avance de borrador:', e)
+    }
   }
 
   // Navegación segura entre ejercicios (con auto-guardado previo)
