@@ -969,13 +969,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             activitiesToMonitor
               .filter(act => act.groupIds.includes(group.id))
               .forEach(act => {
-                const sub = submissions.find(s => {
+                const matchingSubs = submissions.filter(s => {
                   const sCtrl = s.controlNumber || (s as any).studentControlNumber
                   const sActId = s.activityId
                   const matchesAct = sActId === act.id || s.id?.includes(act.id)
                   const matchesCtrl = sCtrl === ctrl || (s.isTeamSubmission && s.teamMembers?.some(m => m.controlNumber === ctrl)) || s.id?.includes(ctrl)
                   return matchesAct && matchesCtrl
                 })
+
+                matchingSubs.sort((a: any, b: any) => {
+                  const timeA = a.lastSyncedAt || (typeof a.updatedAt === 'number' ? a.updatedAt : 0) || a.submittedAt || 0
+                  const timeB = b.lastSyncedAt || (typeof b.updatedAt === 'number' ? b.updatedAt : 0) || b.submittedAt || 0
+                  return timeB - timeA
+                })
+
+                const sub = matchingSubs[0]
 
                 let testsPassed = 0
                 let testsTotal = 0

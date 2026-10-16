@@ -33,6 +33,10 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [isCellular, setIsCellular] = useState<boolean>(() => {
+    const conn = (navigator as any).connection
+    return conn?.type === 'cellular' || conn?.effectiveType === '2g' || conn?.effectiveType === '3g'
+  })
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
 
   useEffect(() => {
@@ -49,8 +53,18 @@ export const Navbar: React.FC<NavbarProps> = ({
       setIsSyncing(false)
     }
 
+    const checkConnection = () => {
+      const conn = (navigator as any).connection
+      setIsCellular(conn?.type === 'cellular' || conn?.effectiveType === '2g' || conn?.effectiveType === '3g')
+    }
+
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
+
+    const conn = (navigator as any).connection
+    if (conn) {
+      conn.addEventListener('change', checkConnection)
+    }
 
     const handleBeforeInstall = (e: Event) => {
       e.preventDefault()
@@ -61,6 +75,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     return () => {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
+      if (conn) {
+        conn.removeEventListener('change', checkConnection)
+      }
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall)
     }
   }, [])
@@ -126,17 +143,26 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
           </>
         ) : isOnline ? (
-          <>
-            <span className="status-dot status-dot-online" />
-            <span style={{ fontSize: '0.75rem', color: '#86EFAC', fontFamily: 'var(--font-mono)' }}>
-              En línea {pendingSyncCount > 0 ? `(${pendingSyncCount} pendientes)` : '(Sincronizado)'}
-            </span>
-          </>
+          isCellular ? (
+            <>
+              <span className="status-dot" style={{ background: '#F59E0B' }} />
+              <span style={{ fontSize: '0.75rem', color: '#FCD34D', fontFamily: 'var(--font-mono)' }}>
+                📱 Datos móviles (Se recomienda Wi-Fi)
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="status-dot status-dot-online" />
+              <span style={{ fontSize: '0.75rem', color: '#86EFAC', fontFamily: 'var(--font-mono)' }}>
+                En línea (Sincronizado)
+              </span>
+            </>
+          )
         ) : (
           <>
             <span className="status-dot status-dot-offline" />
-            <span style={{ fontSize: '0.75rem', color: '#FDE047', fontFamily: 'var(--font-mono)' }}>
-              Modo Offline Activo
+            <span style={{ fontSize: '0.75rem', color: '#EF4444', fontFamily: 'var(--font-mono)' }}>
+              ⚠️ Sin conexión (Conéctate a Wi-Fi)
             </span>
           </>
         )}

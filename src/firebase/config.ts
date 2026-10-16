@@ -1,14 +1,12 @@
 /**
- * Configuración de Firebase con soporte offline nativo de Firestore.
- * Utiliza variables de entorno (VITE_FIREBASE_*) para despliegue en GitHub / Firebase Hosting.
+ * Configuración de Firebase conectada 100% en vivo a Cloud Firestore.
+ * Sin persistencia offline local para evitar desincronizaciones entre dispositivos y navegadores.
  */
 
 import { initializeApp, getApps, getApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
 import { 
   initializeFirestore, 
-  persistentLocalCache, 
-  persistentMultipleTabManager,
   getFirestore
 } from 'firebase/firestore'
 
@@ -27,16 +25,13 @@ export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getA
 // Autenticación
 export const auth = getAuth(app)
 
-// Firestore con caché persistente offline en IndexedDB (soporte multi-pestaña)
+// Firestore 100% en línea (con ignoreUndefinedProperties habilitado)
 export const db = (() => {
   try {
     return initializeFirestore(app, {
-      localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager()
-      })
+      ignoreUndefinedProperties: true
     })
   } catch {
-    // Si ya fue inicializado previamente o en entornos de prueba
     return getFirestore(app)
   }
 })()

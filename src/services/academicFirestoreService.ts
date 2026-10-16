@@ -281,12 +281,16 @@ export const subscribeToSubmissions = (
  */
 export const syncSaveSubmission = async (submission: ActivitySubmission): Promise<void> => {
   try {
-    await setDoc(doc(db, SUBMISSIONS_COLLECTION, submission.id), {
+    // Sanitizar objeto para eliminar cualquier propiedad con valor undefined
+    const cleanSubmission = JSON.parse(JSON.stringify({
       ...submission,
       lastSyncedAt: Date.now()
-    }, { merge: true })
+    }))
+    await setDoc(doc(db, SUBMISSIONS_COLLECTION, submission.id), cleanSubmission, { merge: true })
+    console.log('[FirestoreSync] Entrega guardada exitosamente en Firestore:', submission.id)
   } catch (err) {
-    console.warn('[FirestoreSync] Error al guardar entrega en Firestore:', err)
+    console.error('[FirestoreSync] Error al guardar entrega en Firestore:', err)
+    throw err
   }
 }
 

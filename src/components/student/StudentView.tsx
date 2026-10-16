@@ -26,7 +26,8 @@ import {
   fetchStudentPreference,
   fetchStudentSubmission,
   fetchSubmissionDoc,
-  subscribeToSubmissionDoc
+  subscribeToSubmissionDoc,
+  syncSaveSubmission
 } from '../../services/academicFirestoreService'
 import { ConflictModal } from './ConflictModal'
 import { areGraphsEqual, mergeAutomataGraphs, normalizeAutomataGraph } from '../../utils/diagramMerge'
@@ -453,7 +454,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
         lastSyncedAt: Date.now(),
         isDirtyLocally: !navigator.onLine,
         isTeamSubmission: isTeam,
-        teamId: isTeam ? teamId : undefined,
+        teamId: isTeam && teamId ? teamId : undefined,
         teamName: isTeam ? `Equipo: ${effectiveTeamMembers.map(m => m.fullName.split(' ')[0]).join(' & ')}` : undefined,
         teamMembers: isTeam ? effectiveTeamMembers : undefined,
         lastEditedBy: {
@@ -466,6 +467,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
       }
 
       await localDB.cachedSubmissions.put(draftSub)
+      await syncSaveSubmission(draftSub)
       onSubmissionComplete(draftSub)
     } catch (e) {
       console.warn('Error al sincronizar avance de borrador:', e)
@@ -570,7 +572,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
       submittedAt: Date.now(),
       isDirtyLocally: !navigator.onLine,
       isTeamSubmission: isTeam,
-      teamId: isTeam ? teamId : undefined,
+      teamId: isTeam && teamId ? teamId : undefined,
       teamName: isTeam ? `Equipo: ${effectiveTeamMembers.map(m => m.fullName.split(' ')[0]).join(' & ')}` : undefined,
       teamMembers: isTeam ? effectiveTeamMembers : undefined,
       lastEditedBy: {
@@ -583,15 +585,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
     }
 
     await localDB.cachedSubmissions.put(submission)
-    await localDB.syncQueue.put({
-      id: `sync_${Date.now()}`,
-      action: 'SUBMIT_ACTIVITY',
-      payload: submission,
-      createdAt: Date.now(),
-      status: 'pending',
-      retryCount: 0
-    })
-
+    await syncSaveSubmission(submission)
     onSubmissionComplete(submission)
     setSaveStatusMessage(isTeam ? '¡Actividad entregada para todo el equipo!' : '¡Actividad entregada con éxito!')
   }
