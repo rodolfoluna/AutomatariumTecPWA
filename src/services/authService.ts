@@ -259,6 +259,30 @@ export const removeStudentCompletely = (controlNumber: string) => {
 }
 
 /**
+ * Restablecer contraseña de alumno por parte del docente
+ */
+export const resetStudentPasswordByTeacher = async (
+  controlNumber: string,
+  newPassword?: string,
+  forceChangeOnLogin: boolean = true
+): Promise<string> => {
+  const data = getStoredStudentPasswords()
+  const current = data[controlNumber]
+  const fullName = current?.fullName || `Alumno [${controlNumber}]`
+  const password = newPassword?.trim() || `Tec#${Math.floor(1000 + Math.random() * 9000)}`
+  
+  const record = {
+    password,
+    changed: !forceChangeOnLogin,
+    fullName
+  }
+  data[controlNumber] = record
+  saveStoredStudentPasswords(data)
+  await syncSaveStudent(controlNumber, record)
+  return password
+}
+
+/**
  * Actualizar contraseña de alumno (primer login o cambio)
  */
 export const updateStudentPassword = async (

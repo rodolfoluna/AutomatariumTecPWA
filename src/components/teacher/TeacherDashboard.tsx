@@ -11,7 +11,7 @@ import { StudentGroup, StudentEnrollment, Activity, Exercise, ActivitySubmission
 import { GraphCanvas } from '../canvas/GraphCanvas'
 import { runAFDTestSuite } from '../../simulation/afdSimulator'
 import { runLexerTestSuite } from '../../simulation/lexerSimulator'
-import { getStudentDirectory, registerOrUpdateStudent, removeStudentCompletely } from '../../services/authService'
+import { getStudentDirectory, registerOrUpdateStudent, removeStudentCompletely, resetStudentPasswordByTeacher } from '../../services/authService'
 import { 
   Users, 
   FileText, 
@@ -28,7 +28,10 @@ import {
   Layers,
   Eye,
   Award,
-  MessageSquare
+  MessageSquare,
+  KeyRound,
+  RotateCcw,
+  Copy
 } from 'lucide-react'
 
 interface TeacherDashboardProps {
@@ -104,6 +107,73 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [singleFullName, setSingleFullName] = useState('')
   const [generatedCredentials, setGeneratedCredentials] = useState<StudentEnrollment[]>([])
   const [csvText, setCsvText] = useState('')
+
+  // Modal para restablecer contraseña de alumno
+  const [resetModal, setResetModal] = useState<{
+    isOpen: boolean
+    controlNumber: string
+    studentName: string
+    tempPassword: string
+    forceChange: boolean
+    copied: boolean
+    isSubmitting: boolean
+    successMessage: string | null
+  }>({
+    isOpen: false,
+    controlNumber: '',
+    studentName: '',
+    tempPassword: '',
+    forceChange: true,
+    copied: false,
+    isSubmitting: false,
+    successMessage: null
+  })
+
+  const generateRandomTempPassword = () => {
+    return `Tec#${Math.floor(1000 + Math.random() * 9000)}`
+  }
+
+  const handleOpenResetModal = (controlNumber: string, studentName: string) => {
+    setResetModal({
+      isOpen: true,
+      controlNumber,
+      studentName,
+      tempPassword: generateRandomTempPassword(),
+      forceChange: true,
+      copied: false,
+      isSubmitting: false,
+      successMessage: null
+    })
+  }
+
+  const handleConfirmResetPassword = async () => {
+    if (!resetModal.tempPassword.trim()) return
+    setResetModal(prev => ({ ...prev, isSubmitting: true }))
+    try {
+      await resetStudentPasswordByTeacher(
+        resetModal.controlNumber,
+        resetModal.tempPassword.trim(),
+        resetModal.forceChange
+      )
+      setStudentDirectory(getStudentDirectory())
+      setResetModal(prev => ({
+        ...prev,
+        isSubmitting: false,
+        successMessage: `¡Contraseña de ${prev.studentName} restablecida exitosamente!`
+      }))
+    } catch (err: any) {
+      console.warn('Error al resetear contraseña:', err)
+      setResetModal(prev => ({ ...prev, isSubmitting: false }))
+    }
+  }
+
+  const handleCopyPassword = () => {
+    navigator.clipboard.writeText(resetModal.tempPassword)
+    setResetModal(prev => ({ ...prev, copied: true }))
+    setTimeout(() => {
+      setResetModal(prev => ({ ...prev, copied: false }))
+    }, 2500)
+  }
 
   // Estado para creación o edición de actividad
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null)
@@ -804,15 +874,27 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                           [{ctrl}]
                                         </span>
                                       </div>
-                                      <button
-                                        type="button"
-                                        className="btn btn-secondary btn-sm"
-                                        style={{ color: '#F87171', fontSize: '0.7rem', padding: '2px 8px' }}
-                                        onClick={() => handleRemoveStudentConfirm(group.id, ctrl, studentName)}
-                                        title="Eliminar a este alumno del grupo"
-                                      >
-                                        <Trash2 size={11} /> Quitar Alumno
-                                      </button>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary btn-sm"
+                                          style={{ color: 'var(--primary)', fontSize: '0.7rem', padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
+                                          onClick={() => handleOpenResetModal(ctrl, studentName)}
+                                          title="Restablecer o generar nueva contraseña temporal"
+                                        >
+                                          <KeyRound size={11} /> Resetear Clave
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary btn-sm"
+                                          style={{ color: '#F87171', fontSize: '0.7rem', padding: '2px 8px' }}
+                                          onClick={() => handleRemoveStudentConfirm(group.id, ctrl, studentName)}
+                                          title="Eliminar a este alumno del grupo"
+                                        >
+                                          <Trash2 size={11} /> Quitar Alumno
+                                        </button>
+                                      </div>
                                     </div>
                                   )
                                 })}
@@ -1671,6 +1753,113 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               >
                 {confirmDialog.confirmText}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PARA RESTABLECER CONTRASEÑA DE ALUMNO */}
+      {resetModal.isOpen && (
+        <div className="modal-overlay" style={{ zIndex: 1200 }} onClick={() => setResetModal(prev => ({ ...prev, isOpen: false }))}>
+          <div className="modal-content" style={{ maxWidth: 460, border: '1px solid #3d3d3d' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <div style={{ padding: 8, background: 'rgba(217, 119, 6, 0.15)', borderRadius: '50%', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <KeyRound size={20} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.15rem', fontFamily: 'var(--font-header)', margin: 0, color: 'var(--white)' }}>
+                  Restablecer Contraseña
+                </h3>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  {resetModal.studentName} • <span style={{ fontFamily: 'var(--font-mono)' }}>[{resetModal.controlNumber}]</span>
+                </div>
+              </div>
+            </div>
+
+            {resetModal.successMessage ? (
+              <div style={{ background: 'rgba(16, 185, 129, 0.12)', border: '1px solid #10B981', borderRadius: 'var(--radius-sm)', padding: 14, marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#34D399', fontWeight: 600, fontSize: '0.85rem', marginBottom: 6 }}>
+                  <CheckCircle size={16} /> Contraseña Restablecida Exitosamente
+                </div>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 10px 0' }}>
+                  Proporciona la siguiente clave temporal al alumno:
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#181818', padding: '8px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid #333' }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '1rem', fontWeight: 700, color: 'var(--primary)', letterSpacing: '0.05em', flex: 1 }}>
+                    {resetModal.tempPassword}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleCopyPassword}
+                    style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                  >
+                    {resetModal.copied ? <><Check size={12} color="#10B981" /> Copiado</> : <><Copy size={12} /> Copiar</>}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 16 }}>
+                  Asigna una nueva clave temporal para que el alumno pueda volver a acceder a su cuenta.
+                </p>
+
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                    Nueva Contraseña Temporal:
+                  </label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      type="text"
+                      className="form-input"
+                      style={{ fontFamily: 'var(--font-mono)', letterSpacing: '0.04em', fontWeight: 600 }}
+                      value={resetModal.tempPassword}
+                      onChange={(e) => setResetModal(prev => ({ ...prev, tempPassword: e.target.value }))}
+                      placeholder="ej. Tec#2026"
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      title="Generar otra clave aleatoria"
+                      onClick={() => setResetModal(prev => ({ ...prev, tempPassword: generateRandomTempPassword() }))}
+                    >
+                      <RotateCcw size={14} />
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    <input
+                      type="checkbox"
+                      checked={resetModal.forceChange}
+                      onChange={(e) => setResetModal(prev => ({ ...prev, forceChange: e.target.checked }))}
+                    />
+                    <span>Exigir al alumno cambiar la contraseña en su próximo inicio de sesión</span>
+                  </label>
+                </div>
+              </>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setResetModal(prev => ({ ...prev, isOpen: false }))}
+              >
+                {resetModal.successMessage ? 'Cerrar' : 'Cancelar'}
+              </button>
+              {!resetModal.successMessage && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={resetModal.isSubmitting || !resetModal.tempPassword.trim()}
+                  onClick={handleConfirmResetPassword}
+                >
+                  <KeyRound size={14} />
+                  {resetModal.isSubmitting ? 'Guardando...' : 'Restablecer Clave'}
+                </button>
+              )}
             </div>
           </div>
         </div>
