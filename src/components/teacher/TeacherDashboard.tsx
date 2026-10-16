@@ -1770,11 +1770,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 </div>
                 <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 4 }}>
                   <strong>Actividad:</strong> {activities.find(a => a.id === reviewingSubmission.activityId)?.title || reviewingSubmission.activityId} | 
-                  <strong style={{ marginLeft: 8 }}>Alumno(s):</strong> {
-                    reviewingSubmission.isTeamSubmission && reviewingSubmission.teamMembers 
-                      ? reviewingSubmission.teamMembers.map(m => `${m.fullName} (${m.controlNumber})`).join(', ')
-                      : `${reviewingSubmission.studentName || studentDirectory[reviewingSubmission.controlNumber]?.fullName || 'Alumno'} (${reviewingSubmission.controlNumber})`
-                  }
+                  <strong style={{ marginLeft: 8 }}>Alumno(s):</strong> {(() => {
+                    if (reviewingSubmission.isTeamSubmission && reviewingSubmission.teamMembers) {
+                      return reviewingSubmission.teamMembers.map(m => `${m.fullName} (${m.controlNumber})`).join(', ')
+                    }
+                    const ctrlNum = reviewingSubmission.controlNumber || (reviewingSubmission as any).studentControlNumber || ''
+                    const resolvedName = reviewingSubmission.studentName || (ctrlNum ? studentDirectory[ctrlNum]?.fullName : '') || 'Alumno'
+                    return `${resolvedName}${ctrlNum ? ` (${ctrlNum})` : ''}`
+                  })()}
                 </div>
               </div>
               <button
