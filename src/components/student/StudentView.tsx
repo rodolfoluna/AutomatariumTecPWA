@@ -78,7 +78,10 @@ export const StudentView: React.FC<StudentViewProps> = ({
   const [currentTeam, setCurrentTeam] = useState<StudentTeam | null>(null)
   const [invitationsReceived, setInvitationsReceived] = useState<TeamInvitation[]>([])
   const [invitationsSent, setInvitationsSent] = useState<TeamInvitation[]>([])
-  const [isSoloMode, setIsSoloMode] = useState<boolean>(false)
+  const [isSoloMode, setIsSoloMode] = useState<boolean>(() => {
+    return localStorage.getItem(`solo_${activities[0]?.id || ''}_${studentControlNumber}`) === 'true'
+  })
+  const [isCheckingCloudStatus, setIsCheckingCloudStatus] = useState<boolean>(true)
   const [lastEditedByInfo, setLastEditedByInfo] = useState<string>('Tú (Guardado local)')
 
   const isTeamActivity = selectedActivity?.isTeamActivity || false
@@ -127,32 +130,48 @@ export const StudentView: React.FC<StudentViewProps> = ({
   useEffect(() => {
     if (!selectedActivity) return
 
+    let isMounted = true
     const soloKey = `solo_${selectedActivity.id}_${studentControlNumber}`
     const isSoloLocal = localStorage.getItem(soloKey) === 'true'
     if (isSoloLocal) {
       setIsSoloMode(true)
+      setIsCheckingCloudStatus(false)
+    } else {
+      setIsCheckingCloudStatus(true)
     }
 
-    // Cargar preferencia remota (para recordar en cualquier navegador o equipo si eligió trabajar individual)
-    fetchStudentPreference(selectedActivity.id, studentControlNumber).then(cloudSolo => {
-      if (cloudSolo !== null) {
-        setIsSoloMode(cloudSolo)
-        localStorage.setItem(soloKey, cloudSolo ? 'true' : 'false')
-      } else {
+    const checkStatus = async () => {
+      try {
+        const cloudSolo = await fetchStudentPreference(selectedActivity.id, studentControlNumber)
+        if (!isMounted) return
+        if (cloudSolo !== null) {
+          setIsSoloMode(cloudSolo)
+          localStorage.setItem(soloKey, cloudSolo ? 'true' : 'false')
+          return
+        }
+
         // Si no hay preferencia explícita en settings, verificar si ya tiene entrega registrada en la nube
-        fetchStudentSubmission(selectedActivity.id, studentControlNumber).then(sub => {
-          if (sub) {
-            if (sub.isTeamSubmission && sub.teamId) {
-              setIsSoloMode(false)
-            } else {
-              setIsSoloMode(true)
-              localStorage.setItem(soloKey, 'true')
-              syncSaveStudentPreference(selectedActivity.id, studentControlNumber, true).catch(() => {})
-            }
+        const sub = await fetchStudentSubmission(selectedActivity.id, studentControlNumber)
+        if (!isMounted) return
+        if (sub) {
+          if (sub.isTeamSubmission && sub.teamId) {
+            setIsSoloMode(false)
+          } else {
+            setIsSoloMode(true)
+            localStorage.setItem(soloKey, 'true')
+            await syncSaveStudentPreference(selectedActivity.id, studentControlNumber, true)
           }
-        })
+        }
+      } catch (e) {
+        console.warn('Error al verificar estado de equipo/solo en Firestore:', e)
+      } finally {
+        if (isMounted) {
+          setIsCheckingCloudStatus(false)
+        }
       }
-    })
+    }
+
+    checkStatus()
 
     // Suscripción en tiempo real a equipos en Firestore
     const unsubTeams = subscribeToTeams(selectedActivity.id, async (cloudTeams) => {
@@ -160,7 +179,9 @@ export const StudentView: React.FC<StudentViewProps> = ({
         await localDB.teams.put(t)
       }
       const myTeam = cloudTeams.find(t => t.members.some(m => m.controlNumber === studentControlNumber)) || null
-      setCurrentTeam(myTeam)
+      if (isMounted) {
+        setCurrentTeam(myTeam)
+      }
     })
 
     // Suscripción en tiempo real a invitaciones en Firestore
@@ -170,11 +191,14 @@ export const StudentView: React.FC<StudentViewProps> = ({
       }
       const received = cloudInvs.filter(i => i.toControlNumber === studentControlNumber && i.status === 'pending')
       const sent = cloudInvs.filter(i => i.fromControlNumber === studentControlNumber && i.status === 'pending')
-      setInvitationsReceived(received)
-      setInvitationsSent(sent)
+      if (isMounted) {
+        setInvitationsReceived(received)
+        setInvitationsSent(sent)
+      }
     })
 
     return () => {
+      isMounted = false
       unsubTeams()
       unsubInvs()
     }
@@ -805,22 +829,46 @@ export const StudentView: React.FC<StudentViewProps> = ({
 
       {/* 2. CUERPO PRINCIPAL: LOBBY DE CONFORMACIÓN DE EQUIPO O ÁREA DE TRABAJO */}
       {isTeamActivity && !isStarted && selectedActivity ? (
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          <TeamLobby
-            activity={selectedActivity}
-            currentStudent={{ controlNumber: studentControlNumber, fullName: studentFullName }}
-            classmates={classmates}
-            currentTeam={currentTeam}
-            invitationsReceived={invitationsReceived}
-            invitationsSent={invitationsSent}
-            onSendInvitation={handleSendInvitation}
-            onAcceptInvitation={handleAcceptInvitation}
-            onRejectInvitation={handleRejectInvitation}
-            onCancelInvitation={handleCancelInvitation}
-            onStartWithTeam={handleStartWithTeam}
-            onStartSolo={handleStartSolo}
-          />
-        </div>
+        isCheckingCloudStatus ? (
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 14,
+            color: 'var(--text-muted)'
+          }}>
+            <div style={{
+              width: 34,
+              height: 34,
+              border: '3px solid #333',
+              borderTopColor: 'var(--primary)',
+              borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite'
+            }} />
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+              Sincronizando modalidad y avances desde la nube...
+            </span>
+          </div>
+        ) : (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <TeamLobby
+              activity={selectedActivity}
+              currentStudent={{ controlNumber: studentControlNumber, fullName: studentFullName }}
+              classmates={classmates}
+              currentTeam={currentTeam}
+              invitationsReceived={invitationsReceived}
+              invitationsSent={invitationsSent}
+              onSendInvitation={handleSendInvitation}
+              onAcceptInvitation={handleAcceptInvitation}
+              onRejectInvitation={handleRejectInvitation}
+              onCancelInvitation={handleCancelInvitation}
+              onStartWithTeam={handleStartWithTeam}
+              onStartSolo={handleStartSolo}
+            />
+          </div>
+        )
       ) : (
         <>
           {/* 2. BARRA DE NAVEGACIÓN ENTRE EJERCICIOS (ANTERIOR / PESTAÑAS / SIGUIENTE) */}
