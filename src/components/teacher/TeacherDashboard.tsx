@@ -9,6 +9,7 @@
 import React, { useState } from 'react'
 import { StudentGroup, StudentEnrollment, Activity, Exercise, ActivitySubmission, AFDExercise, LexerExercise, UserProfile } from '../../types/academic'
 import { GraphCanvas } from '../canvas/GraphCanvas'
+import { AutomataGraph } from '../../types/automata'
 import { runAFDTestSuite } from '../../simulation/afdSimulator'
 import { runLexerTestSuite } from '../../simulation/lexerSimulator'
 import { getStudentDirectory, registerOrUpdateStudent, removeStudentCompletely, resetStudentPasswordByTeacher } from '../../services/authService'
@@ -967,25 +968,41 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             activitiesToMonitor
               .filter(act => act.groupIds.includes(group.id))
               .forEach(act => {
-                const sub = submissions.find(s =>
-                  s.activityId === act.id &&
-                  (s.controlNumber === ctrl || (s.isTeamSubmission && s.teamMembers?.some(m => m.controlNumber === ctrl)))
-                )
+                const sub = submissions.find(s => {
+                  const sCtrl = s.controlNumber || (s as any).studentControlNumber
+                  const sActId = s.activityId
+                  const matchesAct = sActId === act.id || s.id?.includes(act.id)
+                  const matchesCtrl = sCtrl === ctrl || (s.isTeamSubmission && s.teamMembers?.some(m => m.controlNumber === ctrl)) || s.id?.includes(ctrl)
+                  return matchesAct && matchesCtrl
+                })
 
                 let testsPassed = 0
                 let testsTotal = 0
-                if (sub?.exerciseSubmissions) {
+                if (typeof (sub as any)?.testsPassed === 'number') {
+                  testsPassed = (sub as any).testsPassed
+                  testsTotal = typeof (sub as any)?.testsTotal === 'number' ? (sub as any).testsTotal : 0
+                } else if (sub?.exerciseSubmissions) {
                   Object.values(sub.exerciseSubmissions).forEach(es => {
-                    testsPassed += es.testsPassed || 0
-                    testsTotal += es.testsTotal || 0
+                    testsPassed += (es as any).testsPassed || 0
+                    testsTotal += (es as any).testsTotal || 0
                   })
-                } else {
+                }
+
+                if (testsTotal === 0) {
                   act.exercises.forEach(ex => {
                     testsTotal += ex.testCases.length
                   })
                 }
 
-                const status: 'not_started' | 'draft' | 'submitted' | 'graded' = sub ? sub.overallStatus : 'not_started'
+                const rawStatus = (sub as any)?.overallStatus || (sub as any)?.status
+                let status: 'not_started' | 'draft' | 'submitted' | 'graded' = 'not_started'
+                if (rawStatus === 'graded') {
+                  status = 'graded'
+                } else if (rawStatus === 'submitted') {
+                  status = 'submitted'
+                } else if (rawStatus === 'in_progress' || rawStatus === 'draft' || sub) {
+                  status = 'draft'
+                }
 
                 progressRows.push({
                   key: `${act.id}_${ctrl}`,
@@ -1774,11 +1791,42 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               const exercises = reviewAct?.exercises || []
               const currentEx = exercises[reviewExerciseIndex] || exercises[0]
               const subEx = currentEx ? reviewingSubmission.exerciseSubmissions?.[currentEx.id] : undefined
-              const graph = subEx?.graph || {
-                projectType: currentEx?.type === 'LEXER_DIAGRAM' ? 'LEXER_DIAGRAM' : 'AFD',
-                states: [],
-                transitions: [],
-                initialState: null
+              let graph: AutomataGraph | undefined = subEx?.graph
+              if (!graph) {
+                const rawDiagram = (subEx as any)?.diagram || (subEx as any)?.diagramData || (reviewingSubmission as any)?.diagramData || (reviewingSubmission as any)?.diagram
+                if (rawDiagram) {
+                  try {
+                    graph = typeof rawDiagram === 'string' ? JSON.parse(rawDiagram) : rawDiagram
+                  } catch (e) {
+                    console.warn('Error parsing diagram:', e)
+                  }
+                }
+              }
+
+              if (!graph && reviewingSubmission.exerciseSubmissions) {
+                const allValues = Object.values(reviewingSubmission.exerciseSubmissions)
+                const candidate = allValues[reviewExerciseIndex] || allValues[0]
+                if (candidate) {
+                  if (candidate.graph) {
+                    graph = candidate.graph
+                  } else {
+                    const raw = (candidate as any).diagram || (candidate as any).diagramData
+                    if (raw) {
+                      try {
+                        graph = typeof raw === 'string' ? JSON.parse(raw) : raw
+                      } catch {}
+                    }
+                  }
+                }
+              }
+
+              if (!graph) {
+                graph = {
+                  projectType: currentEx?.type === 'LEXER_DIAGRAM' ? 'LEXER_DIAGRAM' : 'AFD',
+                  states: [],
+                  transitions: [],
+                  initialState: null
+                }
               }
 
               // Evaluar test suite en vivo

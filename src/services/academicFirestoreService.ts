@@ -12,17 +12,23 @@ import {
   setDoc,
   deleteDoc,
   getDoc,
+  getDocs,
+  query,
+  where,
   onSnapshot,
   Unsubscribe
 } from 'firebase/firestore'
 import { db } from '../firebase/config'
-import { StudentGroup, Activity, ActivitySubmission } from '../types/academic'
+import { StudentGroup, Activity, ActivitySubmission, StudentTeam, TeamInvitation } from '../types/academic'
 
 const SETTINGS_COLLECTION = 'settings'
 const GROUPS_COLLECTION = 'groups'
 const ACTIVITIES_COLLECTION = 'activities'
 const STUDENTS_COLLECTION = 'students'
 const SUBMISSIONS_COLLECTION = 'submissions'
+const TEAMS_COLLECTION = 'teams'
+const INVITATIONS_COLLECTION = 'invitations'
+const PREFERENCES_COLLECTION = 'student_preferences'
 
 // Claves de LocalStorage para contingencia offline
 const LOCAL_STORAGE_GROUPS = 'automatarium_tec_groups'
@@ -311,3 +317,171 @@ export const fetchTeacherName = async (): Promise<string | null> => {
   } catch {}
   return localStorage.getItem(LOCAL_STORAGE_TEACHER_NAME)
 }
+
+/**
+ * -------------------------------------------------------------
+ * SINCRONIZACIÓN DE EQUIPOS (TEAMS) EN FIRESTORE
+ * -------------------------------------------------------------
+ */
+export const syncSaveTeam = async (team: StudentTeam): Promise<void> => {
+  try {
+    await setDoc(doc(db, TEAMS_COLLECTION, team.id), team, { merge: true })
+  } catch (err) {
+    console.warn('[FirestoreSync] Error al guardar equipo en Firestore:', err)
+  }
+}
+
+export const syncDeleteTeam = async (teamId: string): Promise<void> => {
+  try {
+    await deleteDoc(doc(db, TEAMS_COLLECTION, teamId))
+  } catch (err) {
+    console.warn('[FirestoreSync] Error al eliminar equipo de Firestore:', err)
+  }
+}
+
+export const subscribeToTeams = (
+  activityId: string,
+  onUpdate: (teams: StudentTeam[]) => void
+): Unsubscribe => {
+  const q = query(collection(db, TEAMS_COLLECTION), where('activityId', '==', activityId))
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list: StudentTeam[] = []
+      snapshot.forEach(d => list.push(d.data() as StudentTeam))
+      onUpdate(list)
+    },
+    (err) => console.warn('[FirestoreSync] Error al suscribirse a equipos:', err)
+  )
+}
+
+export const fetchTeams = async (activityId: string): Promise<StudentTeam[]> => {
+  try {
+    const q = query(collection(db, TEAMS_COLLECTION), where('activityId', '==', activityId))
+    const snap = await getDocs(q)
+    const list: StudentTeam[] = []
+    snap.forEach(d => list.push(d.data() as StudentTeam))
+    return list
+  } catch {
+    return []
+  }
+}
+
+/**
+ * -------------------------------------------------------------
+ * SINCRONIZACIÓN DE INVITACIONES (INVITATIONS) EN FIRESTORE
+ * -------------------------------------------------------------
+ */
+export const syncSaveInvitation = async (invitation: TeamInvitation): Promise<void> => {
+  try {
+    await setDoc(doc(db, INVITATIONS_COLLECTION, invitation.id), invitation, { merge: true })
+  } catch (err) {
+    console.warn('[FirestoreSync] Error al guardar invitación en Firestore:', err)
+  }
+}
+
+export const syncDeleteInvitation = async (invitationId: string): Promise<void> => {
+  try {
+    await deleteDoc(doc(db, INVITATIONS_COLLECTION, invitationId))
+  } catch (err) {
+    console.warn('[FirestoreSync] Error al eliminar invitación de Firestore:', err)
+  }
+}
+
+export const subscribeToInvitations = (
+  activityId: string,
+  onUpdate: (invitations: TeamInvitation[]) => void
+): Unsubscribe => {
+  const q = query(collection(db, INVITATIONS_COLLECTION), where('activityId', '==', activityId))
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list: TeamInvitation[] = []
+      snapshot.forEach(d => list.push(d.data() as TeamInvitation))
+      onUpdate(list)
+    },
+    (err) => console.warn('[FirestoreSync] Error al suscribirse a invitaciones:', err)
+  )
+}
+
+export const fetchInvitations = async (activityId: string): Promise<TeamInvitation[]> => {
+  try {
+    const q = query(collection(db, INVITATIONS_COLLECTION), where('activityId', '==', activityId))
+    const snap = await getDocs(q)
+    const list: TeamInvitation[] = []
+    snap.forEach(d => list.push(d.data() as TeamInvitation))
+    return list
+  } catch {
+    return []
+  }
+}
+
+/**
+ * -------------------------------------------------------------
+ * PREFERENCIAS DE ALUMNO (TRABAJAR INDIVIDUAL O EN EQUIPO)
+ * -------------------------------------------------------------
+ */
+export const syncSaveStudentPreference = async (
+  activityId: string,
+  controlNumber: string,
+  isSolo: boolean
+): Promise<void> => {
+  try {
+    const prefId = `${activityId}_${controlNumber}`
+    await setDoc(doc(db, PREFERENCES_COLLECTION, prefId), {
+      activityId,
+      controlNumber,
+      isSolo,
+      updatedAt: Date.now()
+    }, { merge: true })
+  } catch (err) {
+    console.warn('[FirestoreSync] Error al guardar preferencia de alumno:', err)
+  }
+}
+
+export const fetchStudentPreference = async (
+  activityId: string,
+  controlNumber: string
+): Promise<boolean | null> => {
+  try {
+    const prefId = `${activityId}_${controlNumber}`
+    const snap = await getDoc(doc(db, PREFERENCES_COLLECTION, prefId))
+    if (snap.exists()) {
+      return snap.data()?.isSolo === true
+    }
+  } catch {}
+  return null
+}
+
+/**
+ * -------------------------------------------------------------
+ * CONSULTA Y SUSCRIPCIÓN ESPECÍFICA A UNA ENTREGA / BORRADOR
+ * -------------------------------------------------------------
+ */
+export const fetchSubmissionDoc = async (submissionId: string): Promise<ActivitySubmission | null> => {
+  try {
+    const snap = await getDoc(doc(db, SUBMISSIONS_COLLECTION, submissionId))
+    if (snap.exists()) {
+      return snap.data() as ActivitySubmission
+    }
+  } catch {}
+  return null
+}
+
+export const subscribeToSubmissionDoc = (
+  submissionId: string,
+  onUpdate: (submission: ActivitySubmission | null) => void
+): Unsubscribe => {
+  return onSnapshot(
+    doc(db, SUBMISSIONS_COLLECTION, submissionId),
+    (snap) => {
+      if (snap.exists()) {
+        onUpdate(snap.data() as ActivitySubmission)
+      } else {
+        onUpdate(null)
+      }
+    },
+    (err) => console.warn('[FirestoreSync] Error al suscribirse a entrega:', err)
+  )
+}
+

@@ -6,7 +6,7 @@
  * - Cambio forzoso de contraseña en primer login
  */
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Activity, Exercise, ActivitySubmission, ExerciseSubmission, AFDExercise, LexerExercise, StudentTeam, TeamInvitation } from '../../types/academic'
 import { AutomataGraph } from '../../types/automata'
 import { GraphCanvas } from '../canvas/GraphCanvas'
@@ -16,6 +16,19 @@ import { TeamLobby } from './TeamLobby'
 import { runAFDTestSuite } from '../../simulation/afdSimulator'
 import { runLexerTestSuite } from '../../simulation/lexerSimulator'
 import { localDB } from '../../db/indexedDb'
+import {
+  syncSaveTeam,
+  syncDeleteInvitation,
+  subscribeToTeams,
+  subscribeToInvitations,
+  syncSaveInvitation,
+  syncSaveStudentPreference,
+  fetchStudentPreference,
+  fetchSubmissionDoc,
+  subscribeToSubmissionDoc
+} from '../../services/academicFirestoreService'
+import { ConflictModal } from './ConflictModal'
+import { areGraphsEqual, mergeAutomataGraphs } from '../../utils/diagramMerge'
 import { 
   Lock, 
   Save, 
@@ -96,34 +109,58 @@ export const StudentView: React.FC<StudentViewProps> = ({
   const [activeSimulationState, setActiveSimulationState] = useState<number | null>(null)
   const [saveStatusMessage, setSaveStatusMessage] = useState<string | null>(null)
 
-  // Cargar equipo e invitaciones al cambiar de actividad o alumno
+  // Estado para gestión de conflictos de concurrencia en equipo
+  const [conflictData, setConflictData] = useState<{
+    localGraph: AutomataGraph
+    remoteGraph: AutomataGraph
+    remoteAuthorName: string
+    remoteTimestamp?: number
+    remoteSubmission: ActivitySubmission
+  } | null>(null)
+
+  // 1. Cargar equipo e invitaciones en tiempo real con Firestore e IndexedDB
   useEffect(() => {
     if (!selectedActivity) return
 
-    const loadTeamData = async () => {
-      const soloKey = `solo_${selectedActivity.id}_${studentControlNumber}`
-      const isSolo = localStorage.getItem(soloKey) === 'true'
-      setIsSoloMode(isSolo)
+    const soloKey = `solo_${selectedActivity.id}_${studentControlNumber}`
+    const isSoloLocal = localStorage.getItem(soloKey) === 'true'
+    setIsSoloMode(isSoloLocal)
 
-      try {
-        const allTeams = await localDB.teams.where('activityId').equals(selectedActivity.id).toArray()
-        const myTeam = allTeams.find(t => t.members.some(m => m.controlNumber === studentControlNumber)) || null
-        setCurrentTeam(myTeam)
-
-        const allInvs = await localDB.invitations.where('activityId').equals(selectedActivity.id).toArray()
-        const received = allInvs.filter(i => i.toControlNumber === studentControlNumber && i.status === 'pending')
-        const sent = allInvs.filter(i => i.fromControlNumber === studentControlNumber && i.status === 'pending')
-        setInvitationsReceived(received)
-        setInvitationsSent(sent)
-      } catch (e) {
-        console.warn('Error loading team data:', e)
+    // Cargar preferencia remota (para recordar en cualquier navegador o equipo si eligió trabajar individual)
+    fetchStudentPreference(selectedActivity.id, studentControlNumber).then(cloudSolo => {
+      if (cloudSolo !== null) {
+        setIsSoloMode(cloudSolo)
+        localStorage.setItem(soloKey, cloudSolo ? 'true' : 'false')
       }
-    }
+    })
 
-    loadTeamData()
+    // Suscripción en tiempo real a equipos en Firestore
+    const unsubTeams = subscribeToTeams(selectedActivity.id, async (cloudTeams) => {
+      for (const t of cloudTeams) {
+        await localDB.teams.put(t)
+      }
+      const myTeam = cloudTeams.find(t => t.members.some(m => m.controlNumber === studentControlNumber)) || null
+      setCurrentTeam(myTeam)
+    })
+
+    // Suscripción en tiempo real a invitaciones en Firestore
+    const unsubInvs = subscribeToInvitations(selectedActivity.id, async (cloudInvs) => {
+      for (const inv of cloudInvs) {
+        await localDB.invitations.put(inv)
+      }
+      const received = cloudInvs.filter(i => i.toControlNumber === studentControlNumber && i.status === 'pending')
+      const sent = cloudInvs.filter(i => i.fromControlNumber === studentControlNumber && i.status === 'pending')
+      setInvitationsReceived(received)
+      setInvitationsSent(sent)
+    })
+
+    return () => {
+      unsubTeams()
+      unsubInvs()
+    }
   }, [selectedActivity?.id, studentControlNumber])
 
-  // Cargar borrador de IndexedDB al cambiar de ejercicio o actividad
+  // 2. Cargar borrador (priorizando nube/Firestore multi-dispositivo y fallback a IndexedDB local)
   useEffect(() => {
     if (!currentExercise || !selectedActivity) return
 
@@ -132,29 +169,154 @@ export const StudentView: React.FC<StudentViewProps> = ({
         ? `${teamId}_${currentExercise.id}`
         : `${selectedActivity.id}_${currentExercise.id}`
       
-      const existingDraft = await localDB.drafts.get(storageKey)
+      const submissionId = isTeam && teamId
+        ? teamId
+        : `${selectedActivity.id}_${studentControlNumber}`
 
-      if (existingDraft) {
+      // A. Cargar borrador local si existe
+      const existingDraft = await localDB.drafts.get(storageKey)
+      if (existingDraft?.graph) {
         setCurrentGraph(existingDraft.graph)
-      } else {
-        setCurrentGraph({
-          projectType: currentExercise.type === 'LEXER_DIAGRAM' ? 'LEXER_DIAGRAM' : 'AFD',
-          states: [
-            { id: 0, name: 'q0', x: 140, y: 160, isFinal: false },
-            { id: 1, name: 'q1', x: 300, y: 160, isFinal: true, token: currentExercise.type === 'LEXER_DIAGRAM' ? 'TOKEN_ID' : undefined }
-          ],
-          transitions: [
-            { id: 1, from: 0, to: 1, read: currentExercise.type === 'LEXER_DIAGRAM' ? '[a-zA-Z]' : '0' }
-          ],
-          initialState: 0
-        })
+      }
+
+      // B. Consultar versión en la nube (Firestore) para persistencia multi-dispositivo y trabajo en equipo
+      try {
+        const cloudSub = await fetchSubmissionDoc(submissionId)
+        if (cloudSub) {
+          let cloudGraph: AutomataGraph | undefined = cloudSub.exerciseSubmissions?.[currentExercise.id]?.graph
+          if (!cloudGraph) {
+            const rawDiagram = (cloudSub.exerciseSubmissions?.[currentExercise.id] as any)?.diagram ||
+                               (cloudSub.exerciseSubmissions?.[currentExercise.id] as any)?.diagramData ||
+                               (cloudSub as any)?.diagramData || (cloudSub as any)?.diagram
+            if (rawDiagram) {
+              try {
+                cloudGraph = typeof rawDiagram === 'string' ? JSON.parse(rawDiagram) : rawDiagram
+              } catch {}
+            }
+          }
+
+          if (cloudGraph && cloudGraph.states && cloudGraph.states.length > 0) {
+            const localHasStates = existingDraft?.graph?.states && existingDraft.graph.states.length > 0
+            const cloudTimestamp = cloudSub.lastSyncedAt || cloudSub.submittedAt || 0
+            const localTimestamp = existingDraft?.updatedAt || 0
+
+            // Si local no tiene estados o la nube es más reciente
+            if (!localHasStates || cloudTimestamp >= localTimestamp) {
+              setCurrentGraph(cloudGraph)
+              await localDB.drafts.put({
+                id: storageKey,
+                activityId: selectedActivity.id,
+                exerciseId: currentExercise.id,
+                title: currentExercise.title,
+                projectType: cloudGraph.projectType,
+                graph: cloudGraph,
+                updatedAt: cloudTimestamp || Date.now()
+              })
+            }
+          }
+        } else if (!existingDraft) {
+          // Plantilla inicial si no hay borrador local ni en la nube
+          setCurrentGraph({
+            projectType: currentExercise.type === 'LEXER_DIAGRAM' ? 'LEXER_DIAGRAM' : 'AFD',
+            states: [
+              { id: 0, name: 'q0', x: 140, y: 160, isFinal: false },
+              { id: 1, name: 'q1', x: 300, y: 160, isFinal: true, token: currentExercise.type === 'LEXER_DIAGRAM' ? 'TOKEN_ID' : undefined }
+            ],
+            transitions: [
+              { id: 1, from: 0, to: 1, read: currentExercise.type === 'LEXER_DIAGRAM' ? '[a-zA-Z]' : '0' }
+            ],
+            initialState: 0
+          })
+        }
+      } catch (err) {
+        console.warn('Error al consultar borrador en Firestore:', err)
       }
     }
 
     loadDraft()
   }, [selectedActivity?.id, currentExercise?.id, isTeam, teamId])
 
-  // Guardado de borrador offline y sincronización de avance para el docente
+  // 3. Colaboración en equipo en tiempo real y detección de conflictos
+  useEffect(() => {
+    if (!isTeam || !teamId || !currentExercise) return
+
+    const unsubTeamDoc = subscribeToSubmissionDoc(teamId, (cloudSub) => {
+      if (!cloudSub || !cloudSub.exerciseSubmissions?.[currentExercise.id]) return
+
+      const editorCtrl = cloudSub.lastEditedBy?.controlNumber
+      if (editorCtrl && editorCtrl !== studentControlNumber) {
+        let remoteGraph = cloudSub.exerciseSubmissions[currentExercise.id].graph
+        if (!remoteGraph) {
+          const raw = (cloudSub.exerciseSubmissions[currentExercise.id] as any).diagram
+          if (raw) {
+            try { remoteGraph = JSON.parse(raw) } catch {}
+          }
+        }
+
+        if (remoteGraph && !areGraphsEqual(currentGraph, remoteGraph)) {
+          // Si el alumno no ha realizado modificaciones locales respecto al borrador guardado, se sincroniza automáticamente
+          setConflictData({
+            localGraph: currentGraph,
+            remoteGraph,
+            remoteAuthorName: cloudSub.lastEditedBy?.fullName || 'Tu compañero',
+            remoteTimestamp: cloudSub.lastEditedBy?.timestamp || cloudSub.lastSyncedAt,
+            remoteSubmission: cloudSub
+          })
+        }
+      }
+    })
+
+    return () => unsubTeamDoc()
+  }, [isTeam, teamId, currentExercise?.id, currentGraph])
+
+  // 4. Manejadores de resolución de conflictos
+  const handleResolveConflictChooseRemote = async () => {
+    if (!conflictData || !currentExercise || !selectedActivity) return
+    setCurrentGraph(conflictData.remoteGraph)
+    const storageKey = isTeam && teamId ? `${teamId}_${currentExercise.id}` : `${selectedActivity.id}_${currentExercise.id}`
+    await localDB.drafts.put({
+      id: storageKey,
+      activityId: selectedActivity.id,
+      exerciseId: currentExercise.id,
+      title: currentExercise.title,
+      projectType: conflictData.remoteGraph.projectType,
+      graph: conflictData.remoteGraph,
+      updatedAt: Date.now()
+    })
+    setConflictData(null)
+    setSaveStatusMessage(`Versión de ${conflictData.remoteAuthorName} aplicada`)
+    setTimeout(() => setSaveStatusMessage(null), 3000)
+  }
+
+  const handleResolveConflictChooseLocal = async () => {
+    if (!conflictData) return
+    setConflictData(null)
+    await handleSaveDraftOffline()
+    setSaveStatusMessage('Tu versión local prevaleció y fue subida a la nube')
+    setTimeout(() => setSaveStatusMessage(null), 3000)
+  }
+
+  const handleResolveConflictMerge = async () => {
+    if (!conflictData || !currentExercise || !selectedActivity) return
+    const merged = mergeAutomataGraphs(conflictData.localGraph, conflictData.remoteGraph)
+    setCurrentGraph(merged)
+    const storageKey = isTeam && teamId ? `${teamId}_${currentExercise.id}` : `${selectedActivity.id}_${currentExercise.id}`
+    await localDB.drafts.put({
+      id: storageKey,
+      activityId: selectedActivity.id,
+      exerciseId: currentExercise.id,
+      title: currentExercise.title,
+      projectType: merged.projectType,
+      graph: merged,
+      updatedAt: Date.now()
+    })
+    setConflictData(null)
+    setSaveStatusMessage('¡Autómatas fusionados exitosamente!')
+    setTimeout(() => setSaveStatusMessage(null), 3000)
+    await handleSaveDraftOffline()
+  }
+
+  // 5. Guardado de borrador offline y sincronización en tiempo real con Cloud Firestore
   const handleSaveDraftOffline = async () => {
     if (!selectedActivity || !currentExercise) return
 
@@ -173,10 +335,9 @@ export const StudentView: React.FC<StudentViewProps> = ({
     })
 
     setLastEditedByInfo(`Tú (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`)
-    setSaveStatusMessage(isTeam ? 'Borrador del equipo guardado localmente' : 'Borrador guardado localmente')
+    setSaveStatusMessage(isTeam ? 'Borrador del equipo sincronizado' : 'Borrador guardado y sincronizado')
     setTimeout(() => setSaveStatusMessage(null), 3000)
 
-    // Sincronizar avance en tiempo real para el monitor docente (como borrador activo)
     try {
       const submissionId = isTeam && teamId
         ? teamId
@@ -204,22 +365,29 @@ export const StudentView: React.FC<StudentViewProps> = ({
       exerciseSubs[currentExercise.id] = {
         exerciseId: currentExercise.id,
         graph: currentGraph,
+        diagram: JSON.stringify(currentGraph),
         status: currentOverallStatus,
         testsPassed,
         testsTotal,
         score: testsTotal > 0 ? Math.round((testsPassed / testsTotal) * 100) : 0,
         updatedAt: Date.now()
-      }
+      } as any
 
-      const draftSub: ActivitySubmission = {
+      const draftSub: ActivitySubmission & Record<string, any> = {
         id: submissionId,
         activityId: selectedActivity.id,
         studentUid: `student_${studentControlNumber}`,
         controlNumber: studentControlNumber,
+        studentControlNumber: studentControlNumber,
         studentName: studentFullName,
         groupId: selectedActivity.groupIds[0] || 'default_group',
         overallStatus: currentOverallStatus,
+        status: currentOverallStatus === 'draft' ? 'in_progress' : currentOverallStatus,
+        diagramData: JSON.stringify(currentGraph),
+        testsPassed,
+        testsTotal,
         submittedAt: existingSub?.submittedAt || Date.now(),
+        lastSyncedAt: Date.now(),
         isDirtyLocally: !navigator.onLine,
         isTeamSubmission: isTeam,
         teamId: isTeam ? teamId : undefined,
@@ -240,6 +408,22 @@ export const StudentView: React.FC<StudentViewProps> = ({
       console.warn('Error al sincronizar avance de borrador:', e)
     }
   }
+
+  // 6. Auto-guardado inteligente (debounced 1.5s) al modificar el diagrama en el lienzo
+  const isInitialMount = useRef(true)
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false
+      return
+    }
+    if (!selectedActivity || !currentExercise) return
+
+    const timer = setTimeout(() => {
+      handleSaveDraftOffline()
+    }, 1500)
+
+    return () => clearTimeout(timer)
+  }, [currentGraph])
 
   // Navegación segura entre ejercicios (con auto-guardado previo)
   const handleNavigateToExercise = async (targetIndex: number) => {
@@ -348,7 +532,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
     setSaveStatusMessage(isTeam ? '¡Actividad entregada para todo el equipo!' : '¡Actividad entregada con éxito!')
   }
 
-  // Manejo de invitaciones de equipo
+  // Manejo de invitaciones de equipo sincronizadas con Firestore y IndexedDB
   const handleSendInvitation = async (toControlNumber: string, toFullName: string) => {
     if (!selectedActivity) return
     const teamIdToUse = currentTeam?.id || `team_${selectedActivity.id}_${studentControlNumber}_${Date.now()}`
@@ -364,6 +548,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
         createdAt: Date.now()
       }
       await localDB.teams.put(team)
+      await syncSaveTeam(team)
       setCurrentTeam(team)
     }
 
@@ -380,13 +565,16 @@ export const StudentView: React.FC<StudentViewProps> = ({
     }
 
     await localDB.invitations.put(invitation)
+    await syncSaveInvitation(invitation)
     setInvitationsSent(prev => [...prev, invitation])
   }
 
   const handleAcceptInvitation = async (invitation: TeamInvitation) => {
     if (!selectedActivity) return
 
-    await localDB.invitations.update(invitation.id, { status: 'accepted' })
+    const updatedInv: TeamInvitation = { ...invitation, status: 'accepted' }
+    await localDB.invitations.put(updatedInv)
+    await syncSaveInvitation(updatedInv)
 
     let team = await localDB.teams.get(invitation.teamId)
     if (!team) {
@@ -408,29 +596,34 @@ export const StudentView: React.FC<StudentViewProps> = ({
     }
 
     await localDB.teams.put(team)
+    await syncSaveTeam(team)
     setCurrentTeam(team)
     setInvitationsReceived(prev => prev.filter(i => i.id !== invitation.id))
   }
 
   const handleRejectInvitation = async (invitationId: string) => {
-    await localDB.invitations.update(invitationId, { status: 'rejected' })
+    await localDB.invitations.delete(invitationId)
+    await syncDeleteInvitation(invitationId)
     setInvitationsReceived(prev => prev.filter(i => i.id !== invitationId))
   }
 
   const handleCancelInvitation = async (invitationId: string) => {
     await localDB.invitations.delete(invitationId)
+    await syncDeleteInvitation(invitationId)
     setInvitationsSent(prev => prev.filter(i => i.id !== invitationId))
   }
 
   const handleStartWithTeam = async (team: StudentTeam) => {
     const lockedTeam: StudentTeam = { ...team, isLocked: true }
     await localDB.teams.put(lockedTeam)
+    await syncSaveTeam(lockedTeam)
     setCurrentTeam(lockedTeam)
   }
 
   const handleStartSolo = () => {
     if (!selectedActivity) return
     localStorage.setItem(`solo_${selectedActivity.id}_${studentControlNumber}`, 'true')
+    syncSaveStudentPreference(selectedActivity.id, studentControlNumber, true).catch(() => {})
     setIsSoloMode(true)
   }
 
@@ -763,6 +956,19 @@ export const StudentView: React.FC<StudentViewProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* 4. MODAL DE RESOLUCIÓN DE CONFLICTOS Y FUSIÓN EN EQUIPO */}
+      {conflictData && (
+        <ConflictModal
+          localGraph={conflictData.localGraph}
+          remoteGraph={conflictData.remoteGraph}
+          remoteAuthorName={conflictData.remoteAuthorName}
+          remoteTimestamp={conflictData.remoteTimestamp}
+          onChooseRemote={handleResolveConflictChooseRemote}
+          onChooseLocal={handleResolveConflictChooseLocal}
+          onMerge={handleResolveConflictMerge}
+        />
       )}
     </div>
   )
