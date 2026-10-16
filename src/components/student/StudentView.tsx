@@ -143,7 +143,13 @@ export const StudentView: React.FC<StudentViewProps> = ({
 
     const checkStatus = async () => {
       try {
-        const cloudSolo = await fetchStudentPreference(selectedActivity.id, studentControlNumber)
+        let cloudSolo: boolean | null = null
+        try {
+          cloudSolo = await fetchStudentPreference(selectedActivity.id, studentControlNumber)
+        } catch (prefErr) {
+          console.warn('[StudentView] fetchStudentPreference no disponible en reglas, verificando entregas:', prefErr)
+        }
+
         if (!isMounted) return
         if (cloudSolo !== null) {
           setIsSoloMode(cloudSolo)
@@ -160,11 +166,11 @@ export const StudentView: React.FC<StudentViewProps> = ({
           } else {
             setIsSoloMode(true)
             localStorage.setItem(soloKey, 'true')
-            await syncSaveStudentPreference(selectedActivity.id, studentControlNumber, true)
+            syncSaveStudentPreference(selectedActivity.id, studentControlNumber, true).catch(() => {})
           }
         }
       } catch (e) {
-        console.warn('Error al verificar estado de equipo/solo en Firestore:', e)
+        console.warn('[StudentView] Error al verificar estado de equipo/solo en Firestore:', e)
       } finally {
         if (isMounted) {
           setIsCheckingCloudStatus(false)
@@ -225,9 +231,22 @@ export const StudentView: React.FC<StudentViewProps> = ({
 
       // B. Consultar versión en la nube (Firestore) para persistencia multi-dispositivo y trabajo en equipo
       try {
-        const cloudSub = isTeam && teamId
+        let cloudSub = isTeam && teamId
           ? await fetchSubmissionDoc(teamId)
           : await fetchStudentSubmission(selectedActivity.id, studentControlNumber)
+
+        // Si estábamos en modo equipo pero el documento de equipo no existe o no tiene diagrama,
+        // consultar si el alumno tiene entrega individual previa con diagrama
+        if ((!cloudSub || !cloudSub.exerciseSubmissions) && isTeam) {
+          try {
+            const soloSub = await fetchStudentSubmission(selectedActivity.id, studentControlNumber)
+            if (soloSub && (soloSub.exerciseSubmissions || (soloSub as any).diagramData)) {
+              cloudSub = soloSub
+              setIsSoloMode(true)
+              localStorage.setItem(`solo_${selectedActivity.id}_${studentControlNumber}`, 'true')
+            }
+          } catch {}
+        }
 
         if (cloudSub) {
           const rawCandidate = cloudSub.exerciseSubmissions?.[currentExercise.id]?.graph ||
@@ -683,6 +702,9 @@ export const StudentView: React.FC<StudentViewProps> = ({
     localStorage.setItem(`solo_${selectedActivity.id}_${studentControlNumber}`, 'true')
     syncSaveStudentPreference(selectedActivity.id, studentControlNumber, true).catch(() => {})
     setIsSoloMode(true)
+    setTimeout(() => {
+      handleSaveDraftOffline().catch(() => {})
+    }, 150)
   }
 
   const handleChangePasswordSubmit = (e: React.FormEvent) => {

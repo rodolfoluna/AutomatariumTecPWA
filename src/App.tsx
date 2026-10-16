@@ -6,6 +6,7 @@
 
 import React, { useState } from 'react'
 import { StudentGroup, Activity, ActivitySubmission, UserProfile } from './types/academic'
+import { AlertTriangle, Smartphone, Wifi, RefreshCw } from 'lucide-react'
 import { Navbar } from './components/common/Navbar'
 import { AboutModal } from './components/common/AboutModal'
 import { TeacherDashboard } from './components/teacher/TeacherDashboard'
@@ -229,6 +230,37 @@ export const App: React.FC = () => {
 
   const [submissions, setSubmissions] = useState<ActivitySubmission[]>(INITIAL_SUBMISSIONS)
 
+  // Estado de conectividad: La plataforma opera 100% en línea y requiere Wi-Fi
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
+  const [isCellular, setIsCellular] = useState<boolean>(() => {
+    const conn = (navigator as any).connection
+    return conn?.type === 'cellular'
+  })
+
+  React.useEffect(() => {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+    const checkConn = () => {
+      const conn = (navigator as any).connection
+      setIsCellular(conn?.type === 'cellular')
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    const conn = (navigator as any).connection
+    if (conn) {
+      conn.addEventListener('change', checkConn)
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+      if (conn) {
+        conn.removeEventListener('change', checkConn)
+      }
+    }
+  }, [])
+
   // Sincronización en tiempo real con Cloud Firestore (Multi-dispositivo)
   React.useEffect(() => {
     // 1. Inicializar datos demostrativos en Firestore una sola vez si la base de datos es virgen
@@ -375,10 +407,77 @@ export const App: React.FC = () => {
     localDB.cachedSubmissions.put(updated).catch(() => {})
   }
 
+  const renderConnectivityModals = () => {
+    if (!isOnline) {
+      return (
+        <div className="modal-overlay" style={{ zIndex: 99999, background: 'rgba(0, 0, 0, 0.94)' }}>
+          <div className="modal-content" style={{ maxWidth: 460, textAlign: 'center', padding: 28, border: '1px solid #EF4444' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(239, 68, 68, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', color: '#EF4444' }}>
+              <AlertTriangle size={30} />
+            </div>
+            <h2 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-header)', marginBottom: 10, color: '#fff' }}>
+              Conexión a Internet Requerida
+            </h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 18 }}>
+              Para garantizar que todos tus diagramas y calificaciones se sincronicen en tiempo real con la nube sin riesgo de pérdida de avance, <strong>el modo sin conexión ha sido deshabilitado</strong>.
+            </p>
+            <div style={{ background: '#1C1917', border: '1px solid #444', borderRadius: 'var(--radius-sm)', padding: 12, fontSize: '0.8rem', color: '#FCD34D', marginBottom: 20, textAlign: 'left', lineHeight: 1.5 }}>
+              ⚠️ Por favor conéctate a una red Wi-Fi o restablece tu conexión a internet para continuar utilizando AutomatariumTec.
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ width: '100%', justifyContent: 'center' }}
+              onClick={() => window.location.reload()}
+            >
+              <RefreshCw size={14} /> Reintentar Conexión
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    if (isCellular) {
+      return (
+        <div className="modal-overlay" style={{ zIndex: 99999, background: 'rgba(0, 0, 0, 0.94)' }}>
+          <div className="modal-content" style={{ maxWidth: 460, textAlign: 'center', padding: 28, border: '1px solid #F59E0B' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(245, 158, 11, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', color: '#F59E0B' }}>
+              <Smartphone size={30} />
+            </div>
+            <h2 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-header)', marginBottom: 10, color: '#fff' }}>
+              Uso Exclusivo en Red Wi-Fi
+            </h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 18 }}>
+              Se ha detectado una conexión a través de <strong>datos móviles (red celular)</strong>.
+            </p>
+            <div style={{ background: '#1C1917', border: '1px solid #444', borderRadius: 'var(--radius-sm)', padding: 12, fontSize: '0.8rem', color: '#FCD34D', marginBottom: 20, textAlign: 'left', lineHeight: 1.5 }}>
+              📱 <strong>Aviso para usuarios de celular:</strong><br />
+              Para asegurar una sincronización continua en tiempo real y evitar consumo de datos o desconexiones, <strong>la plataforma está configurada para funcionar únicamente mediante Wi-Fi</strong>.
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ width: '100%', justifyContent: 'center' }}
+              onClick={() => {
+                const conn = (navigator as any).connection
+                setIsCellular(conn?.type === 'cellular')
+              }}
+            >
+              <Wifi size={14} /> Verificar Conexión Wi-Fi
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    return null
+  }
+
   // Si no hay sesión iniciada, mostrar la pantalla de Login oficial
   if (!currentUser) {
     return (
       <>
+        {renderConnectivityModals()}
         <LoginView
           groups={groups}
           onLoginSuccess={handleLoginSuccess}
@@ -394,6 +493,7 @@ export const App: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg-main)' }}>
+      {renderConnectivityModals()}
       {/* Barra de navegación global estilo Automatarium */}
       <Navbar
         currentUser={currentUser}

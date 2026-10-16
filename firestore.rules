@@ -1,9 +1,16 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Permitir lectura y escritura a las colecciones académicas
-    // (Grupos, Actividades, Alumnos, Entregas y Configuración)
-    // Permite la sincronización en tiempo real entre docentes y alumnos en cualquier navegador/dispositivo
+    // REGLA UNIVERSAL PARA SINCRONIZACIÓN COMPLETA DOCENTE - ALUMNO
+    // Permite lectura y escritura en todas las colecciones:
+    // - groups: Grupos escolares
+    // - activities: Actividades y ejercicios
+    // - students: Directorio de alumnos y contraseñas
+    // - submissions: Entregas y diagramas en tiempo real
+    // - teams: Equipos de trabajo colaborativo
+    // - invitations: Invitaciones entre compañeros
+    // - student_preferences: Modalidad individual vs equipo
+    // - settings: Configuración y estado de inicialización
     match /{document=**} {
       allow read, write: if true;
     }
