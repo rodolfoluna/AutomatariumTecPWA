@@ -40,9 +40,4 @@ jobs:
           channelId: live
           projectId: '${{ secrets.VITE_FIREBASE_PROJECT_ID }}'
 
-      - name: Deploy Firestore Rules
-        run: |
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > sa.json
-          export GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/sa.json
-          npx --yes firebase-tools deploy --only firestore:rules --project "${{ secrets.VITE_FIREBASE_PROJECT_ID }}"
-          rm -f sa.json
+
