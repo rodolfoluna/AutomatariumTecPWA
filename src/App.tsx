@@ -14,6 +14,19 @@ import { LoginView } from './components/auth/LoginView'
 import { getStoredSession, logoutSession, updateStudentPassword, updateTeacherProfile } from './services/authService'
 import { initSyncService } from './services/syncService'
 import { localDB } from './db/indexedDb'
+import {
+  initializeCloudDataOnce,
+  subscribeToGroups,
+  subscribeToActivities,
+  subscribeToStudents,
+  subscribeToSubmissions,
+  syncSaveGroup,
+  syncDeleteGroup,
+  syncSaveActivity,
+  syncDeleteActivity,
+  syncSaveSubmission,
+  syncTeacherName
+} from './services/academicFirestoreService'
 
 const ALL_STUDENTS = [
   { controlNumber: '21280145', fullName: 'García Hernández Juan' },
@@ -196,7 +209,7 @@ export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStoredSession())
   const [isAboutOpen, setIsAboutOpen] = useState(false)
 
-  // Grupos activos (persistidos en localStorage)
+  // Grupos activos (con fallback inicial o de localStorage)
   const [groups, setGroups] = useState<StudentGroup[]>(() => {
     try {
       const saved = localStorage.getItem('automatarium_tec_groups')
@@ -205,11 +218,7 @@ export const App: React.FC = () => {
     return INITIAL_GROUPS
   })
 
-  React.useEffect(() => {
-    localStorage.setItem('automatarium_tec_groups', JSON.stringify(groups))
-  }, [groups])
-
-  // Actividades (persistidas en localStorage)
+  // Actividades (con fallback inicial o de localStorage)
   const [activities, setActivities] = useState<Activity[]>(() => {
     try {
       const saved = localStorage.getItem('automatarium_tec_activities')
@@ -218,11 +227,53 @@ export const App: React.FC = () => {
     return INITIAL_ACTIVITIES
   })
 
-  React.useEffect(() => {
-    localStorage.setItem('automatarium_tec_activities', JSON.stringify(activities))
-  }, [activities])
-
   const [submissions, setSubmissions] = useState<ActivitySubmission[]>(INITIAL_SUBMISSIONS)
+
+  // Sincronización en tiempo real con Cloud Firestore (Multi-dispositivo)
+  React.useEffect(() => {
+    // 1. Inicializar datos demostrativos en Firestore una sola vez si la base de datos es virgen
+    const initialStudentRecords: Record<string, any> = {
+      '21280145': { password: 'Tec#2026', changed: false, fullName: 'García Hernández Juan' },
+      '21280999': { password: 'Tec#2026', changed: true, fullName: 'Sánchez Morales Carlos' },
+      '21280147': { password: 'Tec#2026', changed: false, fullName: 'López Ruiz Ana' }
+    }
+    initializeCloudDataOnce(INITIAL_GROUPS, INITIAL_ACTIVITIES, initialStudentRecords).catch(() => {})
+
+    // 2. Suscribirse a Grupos en Firestore (tiempo real en todos los navegadores)
+    const unsubGroups = subscribeToGroups((cloudGroups) => {
+      setGroups(cloudGroups)
+    })
+
+    // 3. Suscribirse a Actividades en Firestore (tiempo real en todos los navegadores)
+    const unsubActivities = subscribeToActivities((cloudActivities) => {
+      setActivities(cloudActivities)
+    })
+
+    // 4. Suscribirse al Directorio de Alumnos en Firestore
+    const unsubStudents = subscribeToStudents((cloudStudents) => {
+      try {
+        localStorage.setItem('automatarium_tec_student_passwords', JSON.stringify(cloudStudents))
+      } catch {}
+    })
+
+    // 5. Suscribirse a Entregas en Firestore
+    const unsubSubmissions = subscribeToSubmissions((cloudSubmissions) => {
+      if (cloudSubmissions.length > 0) {
+        setSubmissions(cloudSubmissions)
+      }
+    })
+
+    // 6. Servicio de sincronización offline para IndexedDB
+    const cleanupSync = initSyncService(() => {})
+
+    return () => {
+      unsubGroups()
+      unsubActivities()
+      unsubStudents()
+      unsubSubmissions()
+      cleanupSync()
+    }
+  }, [])
 
   const handleLoginSuccess = (user: UserProfile) => {
     setCurrentUser(user)
@@ -240,14 +291,6 @@ export const App: React.FC = () => {
     }
   }
 
-  // Inicializar servicio de sincronización en segundo plano
-  React.useEffect(() => {
-    const cleanup = initSyncService((status) => {
-      // Estado de sincronización en tiempo real
-    })
-    return cleanup
-  }, [])
-
   const handleSaveGroup = (group: StudentGroup) => {
     setGroups(prev => {
       const idx = prev.findIndex(g => g.id === group.id)
@@ -258,19 +301,23 @@ export const App: React.FC = () => {
       }
       return [group, ...prev]
     })
+    syncSaveGroup(group).catch(() => {})
   }
 
   const handleDeleteGroup = (groupId: string) => {
     setGroups(prev => prev.filter(g => g.id !== groupId))
+    syncDeleteGroup(groupId).catch(() => {})
   }
 
   const handleRemoveStudentFromGroup = (groupId: string, controlNumber: string) => {
     setGroups(prev => prev.map(g => {
       if (g.id === groupId) {
-        return {
+        const updated = {
           ...g,
           studentControlNumbers: g.studentControlNumbers.filter(cn => cn !== controlNumber)
         }
+        syncSaveGroup(updated).catch(() => {})
+        return updated
       }
       return g
     }))
@@ -280,6 +327,7 @@ export const App: React.FC = () => {
     if (!newName.trim()) return
     const updated = await updateTeacherProfile(newName)
     setCurrentUser(updated)
+    syncTeacherName(newName).catch(() => {})
   }
 
   const handleSaveActivity = (activity: Activity) => {
@@ -292,10 +340,12 @@ export const App: React.FC = () => {
       }
       return [activity, ...prev]
     })
+    syncSaveActivity(activity).catch(() => {})
   }
 
   const handleDeleteActivity = (activityId: string) => {
     setActivities(prev => prev.filter(a => a.id !== activityId))
+    syncDeleteActivity(activityId).catch(() => {})
   }
 
   const handleSubmissionComplete = (submission: ActivitySubmission) => {
@@ -308,6 +358,7 @@ export const App: React.FC = () => {
       }
       return [submission, ...prev]
     })
+    syncSaveSubmission(submission).catch(() => {})
   }
 
   const handleUpdateSubmission = (updated: ActivitySubmission) => {
@@ -320,6 +371,7 @@ export const App: React.FC = () => {
       }
       return [updated, ...prev]
     })
+    syncSaveSubmission(updated).catch(() => {})
     localDB.cachedSubmissions.put(updated).catch(() => {})
   }
 

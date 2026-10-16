@@ -10,6 +10,12 @@ import { signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import { auth } from '../firebase/config'
 import { UserProfile, StudentGroup } from '../types/academic'
 import { localDB } from '../db/indexedDb'
+import {
+  syncSaveStudent,
+  syncDeleteStudent,
+  syncTeacherName,
+  fetchTeacherName
+} from './academicFirestoreService'
 
 const AUTH_STORAGE_KEY = 'automatarium_tec_session'
 const PASSWORDS_STORAGE_KEY = 'automatarium_tec_student_passwords'
@@ -148,7 +154,8 @@ export const loginTeacher = async (
   if (navigator.onLine && import.meta.env.VITE_FIREBASE_API_KEY && import.meta.env.VITE_FIREBASE_API_KEY !== 'demo-api-key') {
     try {
       const userCred = await signInWithEmailAndPassword(auth, cleanEmail, password)
-      const customTeacherName = localStorage.getItem('automatarium_teacher_custom_name')
+      const cloudTeacherName = await fetchTeacherName()
+      const customTeacherName = cloudTeacherName || localStorage.getItem('automatarium_teacher_custom_name')
       
       // Formatear nombre a partir del correo si no hay nombre personalizado o displayName
       const emailPrefix = cleanEmail.split('@')[0]
@@ -221,6 +228,7 @@ export const updateTeacherProfile = async (newFullName: string): Promise<UserPro
   }
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated))
   localStorage.setItem('automatarium_teacher_custom_name', newFullName.trim())
+  syncTeacherName(newFullName.trim()).catch(() => {})
   return updated
 }
 
@@ -233,18 +241,21 @@ export const getStudentDirectory = (): Record<string, { fullName: string; passwo
 
 export const registerOrUpdateStudent = (controlNumber: string, fullName: string, tempPassword?: string) => {
   const data = getStoredStudentPasswords()
-  data[controlNumber] = {
+  const record = {
     password: tempPassword || data[controlNumber]?.password || 'Tec#2026',
     changed: data[controlNumber]?.changed ?? false,
     fullName: fullName.trim()
   }
+  data[controlNumber] = record
   saveStoredStudentPasswords(data)
+  syncSaveStudent(controlNumber, record).catch(() => {})
 }
 
 export const removeStudentCompletely = (controlNumber: string) => {
   const data = getStoredStudentPasswords()
   delete data[controlNumber]
   saveStoredStudentPasswords(data)
+  syncDeleteStudent(controlNumber).catch(() => {})
 }
 
 /**
@@ -255,12 +266,14 @@ export const updateStudentPassword = async (
   newPassword: string
 ): Promise<void> => {
   const passwords = getStoredStudentPasswords()
-  passwords[controlNumber] = {
+  const record = {
     password: newPassword,
     changed: true,
     fullName: passwords[controlNumber]?.fullName || 'Alumno'
   }
+  passwords[controlNumber] = record
   saveStoredStudentPasswords(passwords)
+  syncSaveStudent(controlNumber, record).catch(() => {})
 
   // Actualizar sesión activa
   const current = getStoredSession()
@@ -269,7 +282,7 @@ export const updateStudentPassword = async (
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(current))
   }
 
-  // Registrar en cola de sincronización
+  // Registrar en cola de sincronización local
   await localDB.syncQueue.put({
     id: `sync_pwd_${Date.now()}`,
     action: 'CHANGE_PASSWORD',
