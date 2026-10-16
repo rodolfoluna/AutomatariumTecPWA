@@ -8,7 +8,7 @@
 import React, { useState } from 'react'
 import { UserRole, UserProfile, StudentGroup } from '../../types/academic'
 import { loginStudent, loginTeacher } from '../../services/authService'
-import { User, GraduationCap, ArrowRight, ShieldCheck, AlertCircle, Info, Sparkles } from 'lucide-react'
+import { User, GraduationCap, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react'
 
 interface LoginViewProps {
   groups: StudentGroup[]
@@ -23,13 +23,13 @@ export const LoginView: React.FC<LoginViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<UserRole>('student')
   
-  // Campos Alumno
-  const [controlNumber, setControlNumber] = useState('21280145')
-  const [studentPassword, setStudentPassword] = useState('Tec#2026')
+  // Campos Alumno (vacíos para producción con solo hints)
+  const [controlNumber, setControlNumber] = useState('')
+  const [studentPassword, setStudentPassword] = useState('')
 
-  // Campos Profesor
-  const [teacherEmail, setTeacherEmail] = useState('prof_mendoza@tec.mx')
-  const [teacherPassword, setTeacherPassword] = useState('tec12345')
+  // Campos Profesor (vacíos para producción con solo hints)
+  const [teacherEmail, setTeacherEmail] = useState('')
+  const [teacherPassword, setTeacherPassword] = useState('')
 
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -64,35 +64,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
     }
   }
 
-  const handleQuickStudentLogin = async (ctrl: string, name: string) => {
-    setControlNumber(ctrl)
-    setStudentPassword('Tec#2026')
-    setErrorMessage(null)
-    setIsLoading(true)
-    try {
-      const user = await loginStudent(ctrl, 'Tec#2026', groups)
-      onLoginSuccess(user)
-    } catch (err: any) {
-      setErrorMessage(err.message)
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
-  const handleQuickTeacherLogin = async () => {
-    setTeacherEmail('prof_mendoza@tec.mx')
-    setTeacherPassword('tec12345')
-    setErrorMessage(null)
-    setIsLoading(true)
-    try {
-      const user = await loginTeacher('prof_mendoza@tec.mx', 'tec12345')
-      onLoginSuccess(user)
-    } catch (err: any) {
-      setErrorMessage(err.message)
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
   return (
     <div style={{
@@ -231,7 +203,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 required
                 className="form-input"
                 style={{ fontFamily: 'var(--font-mono)' }}
-                placeholder="Contraseña temporal o personal"
+                placeholder="Ingresa tu contraseña"
                 value={studentPassword}
                 onChange={(e) => setStudentPassword(e.target.value)}
               />
@@ -248,31 +220,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
             >
               {isLoading ? 'Iniciando sesión...' : 'Ingresar como Alumno'} <ArrowRight size={15} />
             </button>
-
-            {/* Accesos rápidos demostrativos */}
-            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #2E2E2E' }}>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-subtle)', marginBottom: 8, textAlign: 'center' }}>
-                Accesos rápidos para evaluación:
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  style={{ fontSize: '0.75rem', justifyContent: 'flex-start' }}
-                  onClick={() => handleQuickStudentLogin('21280145', 'García Hernández Juan')}
-                >
-                  <Sparkles size={12} color="var(--primary)" /> Juan García (No. Control: 21280145)
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  style={{ fontSize: '0.75rem', justifyContent: 'flex-start' }}
-                  onClick={() => handleQuickStudentLogin('21280999', 'Sánchez Morales Carlos')}
-                >
-                  <Sparkles size={12} color="var(--primary)" /> Carlos Sánchez (No. Control: 21280999)
-                </button>
-              </div>
-            </div>
           </form>
         )}
 
@@ -281,13 +228,13 @@ export const LoginView: React.FC<LoginViewProps> = ({
           <form onSubmit={handleTeacherSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
               <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: 5 }}>
-                Correo Electrónico (Registrado en Firebase):
+                Correo Institucional:
               </label>
               <input
                 type="email"
                 required
                 className="form-input"
-                placeholder="prof_mendoza@tec.mx"
+                placeholder="ej. profesor@tec.edu.mx"
                 value={teacherEmail}
                 onChange={(e) => setTeacherEmail(e.target.value)}
               />
@@ -295,13 +242,13 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
             <div>
               <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: 5 }}>
-                Contraseña de Firebase:
+                Contraseña:
               </label>
               <input
                 type="password"
                 required
                 className="form-input"
-                placeholder="Contraseña del profesor"
+                placeholder="Ingresa tu contraseña"
                 value={teacherPassword}
                 onChange={(e) => setTeacherPassword(e.target.value)}
               />
@@ -315,21 +262,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
             >
               {isLoading ? 'Iniciando sesión...' : 'Ingresar al Panel Docente'} <ArrowRight size={15} />
             </button>
-
-            {/* Acceso rápido demostrativo profesor */}
-            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #2E2E2E' }}>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-subtle)', marginBottom: 8, textAlign: 'center' }}>
-                Acceso rápido para evaluación:
-              </div>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ width: '100%', fontSize: '0.75rem', justifyContent: 'center' }}
-                onClick={handleQuickTeacherLogin}
-              >
-                <Sparkles size={12} color="var(--primary)" /> Prof. Mendoza Morales (prof_mendoza@tec.mx)
-              </button>
-            </div>
           </form>
         )}
 
