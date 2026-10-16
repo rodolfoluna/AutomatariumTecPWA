@@ -35,9 +35,12 @@ import {
   RotateCcw,
   Copy,
   Filter,
-  Clock,
   BarChart2,
-  AlertCircle
+  AlertCircle,
+  Maximize2,
+  Minimize2,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react'
 
 interface TeacherDashboardProps {
@@ -202,12 +205,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   // Ejercicio seleccionado para edición detallada
   const [editingExerciseId, setEditingExerciseId] = useState<string | null>(null)
 
-  // Estado para Revisión y Calificación de Entregas
+  // Estado para Revisión y Calificación de Entregas a Pantalla Completa
   const [reviewingSubmission, setReviewingSubmission] = useState<ActivitySubmission | null>(null)
   const [reviewExerciseIndex, setReviewExerciseIndex] = useState(0)
   const [reviewGrade, setReviewGrade] = useState<number>(100)
   const [reviewFeedback, setReviewFeedback] = useState<string>('')
   const [reviewSaveSuccess, setReviewSaveSuccess] = useState(false)
+  const [isReviewFullscreen, setIsReviewFullscreen] = useState(true)
+  const [isReviewPanelCollapsed, setIsReviewPanelCollapsed] = useState(false)
 
   const handleOpenReview = (sub: ActivitySubmission) => {
     const studentNameFromDir = sub.controlNumber ? studentDirectory[sub.controlNumber]?.fullName : undefined
@@ -1750,19 +1755,43 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         </div>
       )}
 
-      {/* 4. MODAL PARA REVISAR Y CALIFICAR ENTREGA */}
+      {/* 4. MODAL PARA REVISAR Y CALIFICAR ENTREGA (PANTALLA COMPLETA) */}
       {reviewingSubmission && (
-        <div className="modal-overlay" onClick={() => setReviewingSubmission(null)}>
+        <div 
+          className="modal-overlay" 
+          style={{ 
+            zIndex: 1100, 
+            padding: 0, 
+            background: 'rgba(0, 0, 0, 0.96)',
+            alignItems: isReviewFullscreen ? 'stretch' : 'center',
+            justifyContent: isReviewFullscreen ? 'stretch' : 'center'
+          }} 
+          onClick={() => setReviewingSubmission(null)}
+        >
           <div
             className="modal-content"
-            style={{ maxWidth: 1040, maxHeight: '92vh', display: 'flex', flexDirection: 'column', gap: 14 }}
+            style={{ 
+              width: isReviewFullscreen ? '100vw' : '95vw',
+              maxWidth: isReviewFullscreen ? '100vw' : 1240, 
+              height: isReviewFullscreen ? '100vh' : '94vh',
+              maxHeight: isReviewFullscreen ? '100vh' : '94vh', 
+              borderRadius: isReviewFullscreen ? 0 : 'var(--radius-md)',
+              margin: 0,
+              padding: isReviewFullscreen ? '12px 20px' : 20,
+              display: 'flex', 
+              flexDirection: 'column', 
+              gap: 10,
+              boxSizing: 'border-box',
+              overflow: 'hidden'
+            }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header del modal */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #333', paddingBottom: 12 }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-header)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333', paddingBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <h3 style={{ fontSize: '1.2rem', fontFamily: 'var(--font-header)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Eye size={18} color="var(--primary)" />
                     Revisión de Entrega
                   </h3>
                   {reviewingSubmission.isTeamSubmission ? (
@@ -1776,9 +1805,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  <strong>Actividad:</strong> {activities.find(a => a.id === reviewingSubmission.activityId)?.title || reviewingSubmission.activityId} | 
-                  <strong style={{ marginLeft: 8 }}>Alumno(s):</strong> {(() => {
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  <strong>Actividad:</strong> {activities.find(a => a.id === reviewingSubmission.activityId)?.title || reviewingSubmission.activityId} • 
+                  <strong style={{ marginLeft: 6 }}>Alumno(s):</strong> {(() => {
                     if (reviewingSubmission.isTeamSubmission && reviewingSubmission.teamMembers) {
                       return reviewingSubmission.teamMembers.map(m => `${m.fullName} (${m.controlNumber})`).join(', ')
                     }
@@ -1788,13 +1817,26 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   })()}
                 </div>
               </div>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setReviewingSubmission(null)}
-              >
-                <X size={15} />
-              </button>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setIsReviewFullscreen(!isReviewFullscreen)}
+                  title={isReviewFullscreen ? 'Ver en ventana reducida' : 'Ver a Pantalla Completa'}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '0.75rem' }}
+                >
+                  {isReviewFullscreen ? <><Minimize2 size={13} /> Modo Ventana</> : <><Maximize2 size={13} /> Pantalla Completa</>}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setReviewingSubmission(null)}
+                  title="Cerrar Revisión"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             {/* Stepper / pestañas de ejercicios */}
@@ -1843,35 +1885,67 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   )}
 
                   {/* Cuerpo principal de revisión */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16, flex: 1, minHeight: 460 }}>
+                  <div style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: isReviewPanelCollapsed ? '1fr' : '1fr 400px', 
+                    gap: 16, 
+                    flex: 1, 
+                    minHeight: 0,
+                    height: 'calc(100% - 46px)'
+                  }}>
                     {/* Lienzo del Alumno */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minHeight: 0, height: '100%' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontWeight: 600, fontSize: '0.9rem', fontFamily: 'var(--font-header)' }}>
-                          {currentEx?.title}
-                        </span>
-                        <span className={`badge ${currentEx?.type === 'LEXER_DIAGRAM' ? 'badge-lexer' : 'badge-afd'}`}>
-                          {currentEx?.type === 'LEXER_DIAGRAM' ? 'Diagrama Léxico' : 'AFD'}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontWeight: 600, fontSize: '0.92rem', fontFamily: 'var(--font-header)' }}>
+                            {currentEx?.title}
+                          </span>
+                          <span className={`badge ${currentEx?.type === 'LEXER_DIAGRAM' ? 'badge-lexer' : 'badge-afd'}`}>
+                            {currentEx?.type === 'LEXER_DIAGRAM' ? 'Diagrama Léxico' : 'AFD'}
+                          </span>
+                          <span style={{ fontSize: '0.78rem', color: 'var(--text-subtle)' }}>
+                            • {graph.states.length} estados • {graph.transitions.length} transiciones
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => setIsReviewPanelCollapsed(!isReviewPanelCollapsed)}
+                            style={{ fontSize: '0.74rem', padding: '3px 9px', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                            title={isReviewPanelCollapsed ? 'Mostrar panel lateral de calificación' : 'Expandir lienzo a todo lo ancho'}
+                          >
+                            {isReviewPanelCollapsed ? <><ChevronLeft size={13} /> Panel de Calificación</> : <><Maximize2 size={13} /> Expandir Lienzo</>}
+                          </button>
+                        </div>
                       </div>
-                      <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+
+                      <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
                         {currentEx?.instructions}
                       </p>
 
-                      <div style={{ flex: 1, minHeight: 380, border: '1px solid #333', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+                      <div style={{ 
+                        flex: 1, 
+                        minHeight: 0, 
+                        height: '100%', 
+                        border: '1px solid #333', 
+                        borderRadius: 'var(--radius-sm)', 
+                        overflow: 'hidden',
+                        display: 'flex',
+                        flexDirection: 'column'
+                      }}>
                         <GraphCanvas
                           graph={graph}
                           readOnly={true}
                           onChange={() => {}}
                         />
                       </div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-subtle)', textAlign: 'right' }}>
-                        Visualización en modo lectura • {graph.states.length} estados • {graph.transitions.length} transiciones
-                      </div>
                     </div>
 
                     {/* Columna Derecha: Pruebas Automáticas y Calificación */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', maxHeight: 520, paddingRight: 4 }}>
+                    {!isReviewPanelCollapsed && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', maxHeight: '100%', paddingRight: 4 }}>
                       {/* 1. Resultados de pruebas */}
                       <div className="automatarium-card" style={{ padding: 14 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -2000,8 +2074,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                         </div>
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
+              </div>
               )
             })()}
           </div>

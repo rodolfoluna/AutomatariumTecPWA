@@ -22,7 +22,9 @@ import {
   ZoomIn, 
   ZoomOut, 
   Maximize2,
-  X
+  X,
+  Compass,
+  Move
 } from 'lucide-react'
 
 type CanvasTool = 'cursor' | 'hand' | 'state' | 'transition'
@@ -53,12 +55,110 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [isPanning, setIsPanning] = useState(false)
   const [panStart, setPanStart] = useState({ x: 0, y: 0 })
+  const [touchDistance, setTouchDistance] = useState<number | null>(null)
 
   // Edición de transición
   const [editingTransition, setEditingTransition] = useState<AutomataTransition | null>(null)
   const [newTransRead, setNewTransRead] = useState('')
 
   const isLexerMode = graph.projectType === 'LEXER_DIAGRAM'
+
+  // Función para centrar y ajustar el diagrama automáticamente al tamaño del lienzo
+  const fitGraphToView = React.useCallback(() => {
+    if (!graph.states || graph.states.length === 0 || !svgRef.current) {
+      setZoom(1)
+      setPan({ x: 0, y: 0 })
+      return
+    }
+
+    const svgRect = svgRef.current.getBoundingClientRect()
+    if (!svgRect.width || !svgRect.height) return
+
+    const xs = graph.states.map(s => s.x)
+    const ys = graph.states.map(s => s.y)
+    const padding = 80
+
+    const minX = Math.min(...xs) - STATE_RADIUS - padding
+    const maxX = Math.max(...xs) + STATE_RADIUS + padding
+    const minY = Math.min(...ys) - STATE_RADIUS - padding
+    const maxY = Math.max(...ys) + STATE_RADIUS + padding
+
+    const graphWidth = Math.max(140, maxX - minX)
+    const graphHeight = Math.max(140, maxY - minY)
+
+    const scaleX = (svgRect.width - 60) / graphWidth
+    const scaleY = (svgRect.height - 60) / graphHeight
+    const targetZoom = Math.min(1.25, Math.max(0.4, Math.min(scaleX, scaleY)))
+
+    const centerX = (minX + maxX) / 2
+    const centerY = (minY + maxY) / 2
+
+    const newPanX = Math.round(svgRect.width / 2 - centerX * targetZoom)
+    const newPanY = Math.round(svgRect.height / 2 - centerY * targetZoom)
+
+    setZoom(Number(targetZoom.toFixed(2)))
+    setPan({ x: newPanX, y: newPanY })
+  }, [graph.states])
+
+  // Centrar automáticamente en modo lectura al cargar el componente o cambiar de ejercicio
+  React.useEffect(() => {
+    if (readOnly) {
+      const timer = setTimeout(() => {
+        fitGraphToView()
+      }, 100)
+      return () => clearTimeout(timer)
+    }
+  }, [readOnly, graph.states.length, fitGraphToView])
+
+  // Desplazamiento (pan) con rueda del ratón y zoom con Ctrl+Rueda
+  const handleWheel = (e: React.WheelEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault()
+      const factor = e.deltaY < 0 ? 1.1 : 0.9
+      setZoom(z => Math.max(0.25, Math.min(2.5, Number((z * factor).toFixed(2)))))
+    } else {
+      // Pan libre con scroll del ratón o trackpad
+      setPan(p => ({
+        x: Math.round(p.x - e.deltaX),
+        y: Math.round(p.y - e.deltaY)
+      }))
+    }
+  }
+
+  // Soporte táctil en celulares y tabletas
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      const touch = e.touches[0]
+      setIsPanning(true)
+      setPanStart({ x: touch.clientX - pan.x, y: touch.clientY - pan.y })
+    } else if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      )
+      setTouchDistance(dist)
+    }
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 1 && isPanning) {
+      const touch = e.touches[0]
+      setPan({ x: touch.clientX - panStart.x, y: touch.clientY - panStart.y })
+    } else if (e.touches.length === 2 && touchDistance !== null) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      )
+      const factor = dist / touchDistance
+      setZoom(z => Math.max(0.25, Math.min(2.5, Number((z * factor).toFixed(2)))))
+      setTouchDistance(dist)
+    }
+  }
+
+  const handleTouchEnd = () => {
+    setIsPanning(false)
+    setTouchDistance(null)
+  }
 
   // Manejar clic en el canvas según la herramienta activa (solo en el fondo)
   const handleCanvasClick = (e: React.MouseEvent) => {
@@ -104,7 +204,12 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
   // Interacción de estados
   const handleMouseDownState = (e: React.MouseEvent, state: AutomataState) => {
-    if (readOnly) return
+    if (readOnly) {
+      // En modo lectura: arrastrar sobre un nodo o fondo desplaza el lienzo
+      setIsPanning(true)
+      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y })
+      return
+    }
     e.stopPropagation()
 
     if (selectedTool === 'transition' || connectingFromId !== null) {
@@ -133,7 +238,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   }
 
   const handleMouseDownCanvas = (e: React.MouseEvent) => {
-    if (selectedTool === 'hand' || e.button === 1 || e.shiftKey) {
+    if (readOnly || selectedTool === 'hand' || e.button === 0 || e.button === 1 || e.shiftKey) {
       setIsPanning(true)
       setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y })
     }
@@ -295,8 +400,17 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           <button 
             type="button" 
             className="btn btn-secondary btn-sm"
+            onClick={fitGraphToView}
+            title="Ajustar y centrar diagrama completo"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+          >
+            <Compass size={13} /> Centrar
+          </button>
+          <button 
+            type="button" 
+            className="btn btn-secondary btn-sm"
             onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}
-            title="Restablecer vista"
+            title="Restablecer vista a 100%"
           >
             <Maximize2 size={13} />
           </button>
@@ -312,14 +426,45 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           backgroundColor: '#1B1B1B',
           backgroundImage: 'radial-gradient(#333333 12.5%, #1B1B1B 12.5%)',
           backgroundSize: '16px 16px',
-          cursor: selectedTool === 'hand' ? 'grab' : selectedTool === 'state' ? 'cell' : selectedTool === 'transition' ? 'crosshair' : 'default',
+          cursor: readOnly 
+            ? (isPanning ? 'grabbing' : 'grab') 
+            : (selectedTool === 'hand' ? (isPanning ? 'grabbing' : 'grab') : selectedTool === 'state' ? 'cell' : selectedTool === 'transition' ? 'crosshair' : 'default'),
           overflow: 'hidden'
         }}
         onClick={handleCanvasClick}
         onMouseDown={handleMouseDownCanvas}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
+        onWheel={handleWheel}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       >
+        {/* Indicador de ayuda en modo lectura */}
+        {readOnly && (
+          <div style={{
+            position: 'absolute',
+            bottom: 12,
+            left: 14,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 7,
+            background: 'rgba(24, 24, 24, 0.88)',
+            backdropFilter: 'blur(8px)',
+            padding: '5px 12px',
+            borderRadius: 'var(--radius-sm)',
+            border: '1px solid #3E3E3E',
+            fontSize: '0.74rem',
+            color: 'var(--text-muted)',
+            zIndex: 20,
+            pointerEvents: 'none',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+          }}>
+            <Move size={13} color="var(--primary)" />
+            <span>Arrastra para mover el diagrama • Rueda para zoom / scroll</span>
+          </div>
+        )}
+
         {/* BARRA DE HERRAMIENTAS FLOTANTE LATERAL IZQUIERDA (Estilo Automatarium) */}
         {!readOnly && (
           <div style={{
