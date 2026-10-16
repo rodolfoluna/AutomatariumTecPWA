@@ -208,7 +208,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [reviewSaveSuccess, setReviewSaveSuccess] = useState(false)
 
   const handleOpenReview = (sub: ActivitySubmission) => {
-    setReviewingSubmission(sub)
+    const studentNameFromDir = sub.controlNumber ? studentDirectory[sub.controlNumber]?.fullName : undefined
+    const enrichedSub: ActivitySubmission = {
+      ...sub,
+      studentName: sub.studentName || studentNameFromDir || (sub.controlNumber ? `Alumno [${sub.controlNumber}]` : 'Alumno')
+    }
+    setReviewingSubmission(enrichedSub)
     setReviewExerciseIndex(0)
     setReviewGrade(sub.grade ?? 100)
     setReviewFeedback(sub.teacherFeedback ?? '')
@@ -1750,7 +1755,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   <strong style={{ marginLeft: 8 }}>Alumno(s):</strong> {
                     reviewingSubmission.isTeamSubmission && reviewingSubmission.teamMembers 
                       ? reviewingSubmission.teamMembers.map(m => `${m.fullName} (${m.controlNumber})`).join(', ')
-                      : `${reviewingSubmission.studentName} (${reviewingSubmission.controlNumber})`
+                      : `${reviewingSubmission.studentName || studentDirectory[reviewingSubmission.controlNumber]?.fullName || 'Alumno'} (${reviewingSubmission.controlNumber})`
                   }
                 </div>
               </div>
