@@ -7,10 +7,11 @@
  */
 
 import React, { useState } from 'react'
-import { StudentGroup, StudentEnrollment, Activity, Exercise, ActivitySubmission, AFDExercise, LexerExercise } from '../../types/academic'
+import { StudentGroup, StudentEnrollment, Activity, Exercise, ActivitySubmission, AFDExercise, LexerExercise, UserProfile } from '../../types/academic'
 import { GraphCanvas } from '../canvas/GraphCanvas'
 import { runAFDTestSuite } from '../../simulation/afdSimulator'
 import { runLexerTestSuite } from '../../simulation/lexerSimulator'
+import { getStudentDirectory, registerOrUpdateStudent } from '../../services/authService'
 import { 
   Users, 
   FileText, 
@@ -31,25 +32,41 @@ import {
 } from 'lucide-react'
 
 interface TeacherDashboardProps {
+  currentUser: UserProfile
   groups: StudentGroup[]
   activities: Activity[]
   submissions: ActivitySubmission[]
   onSaveGroup: (group: StudentGroup) => void
+  onDeleteGroup?: (groupId: string) => void
+  onRemoveStudentFromGroup?: (groupId: string, controlNumber: string) => void
   onSaveActivity: (activity: Activity) => void
   onDeleteActivity?: (activityId: string) => void
   onUpdateSubmission?: (submission: ActivitySubmission) => void
+  onUpdateTeacherName?: (newName: string) => void
 }
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
+  currentUser,
   groups,
   activities,
   submissions,
   onSaveGroup,
+  onDeleteGroup,
+  onRemoveStudentFromGroup,
   onSaveActivity,
   onDeleteActivity,
-  onUpdateSubmission
+  onUpdateSubmission,
+  onUpdateTeacherName
 }) => {
   const [activeTab, setActiveTab] = useState<'groups' | 'activities' | 'submissions'>('activities')
+
+  // Estado para edición del nombre del docente
+  const [isEditingNameModalOpen, setIsEditingNameModalOpen] = useState(false)
+  const [editingTeacherName, setEditingTeacherName] = useState(currentUser.fullName)
+
+  // Directorio de alumnos para consultar nombres por número de control
+  const [studentDirectory, setStudentDirectory] = useState<Record<string, { fullName: string }>>(() => getStudentDirectory())
+  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(groups[0]?.id || null)
 
   // Grupos
   const [isCreatingGroup, setIsCreatingGroup] = useState(false)
@@ -265,6 +282,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       enrolledAt: Date.now()
     }
 
+    registerOrUpdateStudent(student.controlNumber, student.fullName, tempPassword)
+    setStudentDirectory(prev => ({ ...prev, [student.controlNumber]: { fullName: student.fullName } }))
+
     const group = groups.find(g => g.id === selectedGroupId)
     if (group) {
       const updatedGroup: StudentGroup = {
@@ -292,12 +312,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         const nc = parts[0].trim()
         const name = parts[1].trim()
         if (nc && name && nc.toLowerCase() !== 'control' && nc.toLowerCase() !== 'numero_control') {
+          const tempPwd = generateTempPassword()
           newStudents.push({
             controlNumber: nc,
             fullName: name,
-            temporaryPassword: generateTempPassword(),
+            temporaryPassword: tempPwd,
             enrolledAt: Date.now()
           })
+          registerOrUpdateStudent(nc, name, tempPwd)
         }
       }
     })
@@ -311,6 +333,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         ]))
       }
       onSaveGroup(updatedGroup)
+      setStudentDirectory(prev => {
+        const copy = { ...prev }
+        newStudents.forEach(s => { copy[s.controlNumber] = { fullName: s.fullName } })
+        return copy
+      })
       setGeneratedCredentials(prev => [...newStudents, ...prev])
       setCsvText('')
     }
@@ -322,7 +349,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
     const group: StudentGroup = {
       id: `group_${Date.now()}`,
-      teacherId: 'prof_mendoza',
+      teacherId: currentUser.uid,
       name: newGroupName.trim(),
       period: newGroupPeriod.trim(),
       studentControlNumbers: [],
@@ -331,8 +358,29 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
     onSaveGroup(group)
     setSelectedGroupId(group.id)
+    setExpandedGroupId(group.id)
     setIsCreatingGroup(false)
     setNewGroupName('')
+  }
+
+  const handleDeleteGroupConfirm = (groupId: string, groupName: string) => {
+    if (window.confirm(`¿Estás seguro de que deseas eliminar el grupo "${groupName}"? Esta acción no se puede deshacer.`)) {
+      if (onDeleteGroup) {
+        onDeleteGroup(groupId)
+      }
+      if (selectedGroupId === groupId) {
+        const remaining = groups.filter(g => g.id !== groupId)
+        setSelectedGroupId(remaining[0]?.id || '')
+      }
+    }
+  }
+
+  const handleRemoveStudentConfirm = (groupId: string, controlNumber: string, studentName: string) => {
+    if (window.confirm(`¿Estás seguro de quitar al alumno "${studentName}" (${controlNumber}) de este grupo?`)) {
+      if (onRemoveStudentFromGroup) {
+        onRemoveStudentFromGroup(groupId, controlNumber)
+      }
+    }
   }
 
   const activeEditingExercise = formExercises.find(e => e.id === editingExerciseId)
@@ -345,9 +393,26 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           <h1 style={{ fontSize: '1.6rem', fontWeight: 700, fontFamily: 'var(--font-header)', color: 'var(--white)' }}>
             Panel de Gestión Docente
           </h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: 4 }}>
-            Crea y edita actividades y ejercicios, administra grupos y revisa el progreso offline de los alumnos.
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              Docente Titular:
+            </span>
+            <span style={{ fontWeight: 600, color: 'var(--primary)', fontSize: '0.875rem' }}>
+              {currentUser.fullName}
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              style={{ fontSize: '0.725rem', padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
+              onClick={() => {
+                setEditingTeacherName(currentUser.fullName)
+                setIsEditingNameModalOpen(true)
+              }}
+              title="Cambiar el nombre del profesor que se muestra en la plataforma"
+            >
+              <Edit3 size={11} /> Cambiar Nombre
+            </button>
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: 10 }}>
@@ -594,31 +659,131 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             )}
 
             <div className="automatarium-card" style={{ padding: 20 }}>
-              <h3 style={{ fontSize: '1.05rem', marginBottom: 14, fontFamily: 'var(--font-header)' }}>Grupos Activos</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {groups.map(group => (
-                  <div
-                    key={group.id}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      padding: '12px 16px',
-                      background: '#1C1C1C',
-                      borderRadius: 'var(--radius-sm)',
-                      border: '1px solid #333'
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{group.name}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Periodo: {group.period}</div>
-                    </div>
-                    <span className="badge badge-afd">
-                      {group.studentControlNumbers.length} Alumnos
-                    </span>
-                  </div>
-                ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <h3 style={{ fontSize: '1.05rem', fontFamily: 'var(--font-header)' }}>
+                  Grupos Activos ({groups.length})
+                </h3>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontSize: '0.75rem', padding: '3px 9px' }}
+                  onClick={() => setIsCreatingGroup(true)}
+                >
+                  <Plus size={13} /> Agregar Grupo
+                </button>
               </div>
+
+              {groups.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                  No tienes grupos registrados. Haz clic en "Agregar Grupo" para dar de alta uno.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {groups.map(group => {
+                    const isExpanded = expandedGroupId === group.id
+                    return (
+                      <div
+                        key={group.id}
+                        style={{
+                          background: '#1C1C1C',
+                          borderRadius: 'var(--radius-sm)',
+                          border: isExpanded ? '1px solid var(--primary)' : '1px solid #333',
+                          overflow: 'hidden'
+                        }}
+                      >
+                        {/* Cabecera del Grupo */}
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '12px 16px',
+                            cursor: 'pointer',
+                            background: isExpanded ? '#222' : '#1C1C1C'
+                          }}
+                          onClick={() => setExpandedGroupId(isExpanded ? null : group.id)}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span>{group.name}</span>
+                              <span className="badge badge-afd" style={{ fontSize: '0.68rem', padding: '2px 6px' }}>
+                                {group.studentControlNumbers.length} Alumnos
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                              Periodo: {group.period} • {isExpanded ? '▼ Ocultar alumnos' : '► Ver alumnos'}
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} onClick={e => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ color: '#F87171', padding: '4px 8px', fontSize: '0.72rem' }}
+                              onClick={() => handleDeleteGroupConfirm(group.id, group.name)}
+                              title="Eliminar este grupo"
+                            >
+                              <Trash2 size={13} /> Eliminar Grupo
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Lista de Alumnos del Grupo */}
+                        {isExpanded && (
+                          <div style={{ padding: '12px 16px', borderTop: '1px solid #303030', background: '#161616' }}>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>
+                              Alumnos Inscritos ({group.studentControlNumbers.length}):
+                            </div>
+
+                            {group.studentControlNumbers.length === 0 ? (
+                              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic', padding: '6px 0' }}>
+                                No hay alumnos en este grupo. Inscríbelos usando el formulario de la izquierda.
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '240px', overflowY: 'auto' }}>
+                                {group.studentControlNumbers.map(ctrl => {
+                                  const studentName = studentDirectory[ctrl]?.fullName || `Alumno [${ctrl}]`
+                                  return (
+                                    <div
+                                      key={ctrl}
+                                      style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        padding: '7px 12px',
+                                        background: '#202020',
+                                        borderRadius: 'var(--radius-sm)',
+                                        border: '1px solid #333',
+                                        fontSize: '0.8rem'
+                                      }}
+                                    >
+                                      <div>
+                                        <span style={{ fontWeight: 600 }}>{studentName}</span>
+                                        <span style={{ marginLeft: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                                          [{ctrl}]
+                                        </span>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        style={{ color: '#F87171', fontSize: '0.7rem', padding: '2px 8px' }}
+                                        onClick={() => handleRemoveStudentConfirm(group.id, ctrl, studentName)}
+                                        title="Eliminar a este alumno del grupo"
+                                      >
+                                        <Trash2 size={11} /> Quitar Alumno
+                                      </button>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1320,6 +1485,111 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 </div>
               )
             })()}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PARA CAMBIAR NOMBRE DEL DOCENTE */}
+      {isEditingNameModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsEditingNameModalOpen(false)}>
+          <div className="modal-content" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ fontSize: '1.15rem', fontFamily: 'var(--font-header)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Edit3 size={18} color="var(--primary)" />
+                Modificar Nombre del Docente
+              </h3>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setIsEditingNameModalOpen(false)}>
+                <X size={15} />
+              </button>
+            </div>
+
+            <form onSubmit={(e) => {
+              e.preventDefault()
+              if (!editingTeacherName.trim()) return
+              if (onUpdateTeacherName) {
+                onUpdateTeacherName(editingTeacherName.trim())
+              }
+              setIsEditingNameModalOpen(false)
+            }}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                  Nombre Completo del Profesor (como aparecerá en la plataforma):
+                </label>
+                <input
+                  type="text"
+                  required
+                  className="form-input"
+                  value={editingTeacherName}
+                  onChange={(e) => setEditingTeacherName(e.target.value)}
+                  placeholder="ej. Prof. Rodolfo Luna"
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setIsEditingNameModalOpen(false)}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  <Save size={14} /> Guardar Nombre
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PARA CREAR NUEVO GRUPO */}
+      {isCreatingGroup && (
+        <div className="modal-overlay" onClick={() => setIsCreatingGroup(false)}>
+          <div className="modal-content" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ fontSize: '1.15rem', fontFamily: 'var(--font-header)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Plus size={18} color="var(--primary)" />
+                Crear Nuevo Grupo
+              </h3>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setIsCreatingGroup(false)}>
+                <X size={15} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateGroup}>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                  Nombre del Grupo / Materia:
+                </label>
+                <input
+                  type="text"
+                  required
+                  className="form-input"
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  placeholder="ej. Lenguajes y Autómatas II - Gpo 8B"
+                />
+              </div>
+
+              <div style={{ marginBottom: 18 }}>
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                  Periodo Escolar:
+                </label>
+                <input
+                  type="text"
+                  required
+                  className="form-input"
+                  value={newGroupPeriod}
+                  onChange={(e) => setNewGroupPeriod(e.target.value)}
+                  placeholder="ej. Enero - Junio 2026"
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setIsCreatingGroup(false)}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  <Check size={14} /> Crear Grupo
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -11,7 +11,7 @@ import { AboutModal } from './components/common/AboutModal'
 import { TeacherDashboard } from './components/teacher/TeacherDashboard'
 import { StudentView } from './components/student/StudentView'
 import { LoginView } from './components/auth/LoginView'
-import { getStoredSession, logoutSession, updateStudentPassword } from './services/authService'
+import { getStoredSession, logoutSession, updateStudentPassword, updateTeacherProfile } from './services/authService'
 import { initSyncService } from './services/syncService'
 import { localDB } from './db/indexedDb'
 
@@ -194,9 +194,21 @@ const INITIAL_SUBMISSIONS: ActivitySubmission[] = [
 export const App: React.FC = () => {
   // Sesión de usuario activo (obtenida de localStorage si existe)
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getStoredSession())
-
   const [isAboutOpen, setIsAboutOpen] = useState(false)
-  const [groups, setGroups] = useState<StudentGroup[]>(INITIAL_GROUPS)
+
+  // Grupos activos (persistidos en localStorage)
+  const [groups, setGroups] = useState<StudentGroup[]>(() => {
+    try {
+      const saved = localStorage.getItem('automatarium_tec_groups')
+      if (saved) return JSON.parse(saved)
+    } catch {}
+    return INITIAL_GROUPS
+  })
+
+  React.useEffect(() => {
+    localStorage.setItem('automatarium_tec_groups', JSON.stringify(groups))
+  }, [groups])
+
   const [activities, setActivities] = useState<Activity[]>(INITIAL_ACTIVITIES)
   const [submissions, setSubmissions] = useState<ActivitySubmission[]>(INITIAL_SUBMISSIONS)
 
@@ -234,6 +246,28 @@ export const App: React.FC = () => {
       }
       return [group, ...prev]
     })
+  }
+
+  const handleDeleteGroup = (groupId: string) => {
+    setGroups(prev => prev.filter(g => g.id !== groupId))
+  }
+
+  const handleRemoveStudentFromGroup = (groupId: string, controlNumber: string) => {
+    setGroups(prev => prev.map(g => {
+      if (g.id === groupId) {
+        return {
+          ...g,
+          studentControlNumbers: g.studentControlNumbers.filter(cn => cn !== controlNumber)
+        }
+      }
+      return g
+    }))
+  }
+
+  const handleUpdateTeacherName = async (newName: string) => {
+    if (!newName.trim()) return
+    const updated = await updateTeacherProfile(newName)
+    setCurrentUser(updated)
   }
 
   const handleSaveActivity = (activity: Activity) => {
@@ -308,13 +342,17 @@ export const App: React.FC = () => {
       <main style={{ flex: 1 }}>
         {currentUser.role === 'teacher' ? (
           <TeacherDashboard
+            currentUser={currentUser}
             groups={groups}
             activities={activities}
             submissions={submissions}
             onSaveGroup={handleSaveGroup}
+            onDeleteGroup={handleDeleteGroup}
+            onRemoveStudentFromGroup={handleRemoveStudentFromGroup}
             onSaveActivity={handleSaveActivity}
             onDeleteActivity={handleDeleteActivity}
             onUpdateSubmission={handleUpdateSubmission}
+            onUpdateTeacherName={handleUpdateTeacherName}
           />
         ) : (
           <StudentView

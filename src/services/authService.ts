@@ -148,11 +148,12 @@ export const loginTeacher = async (
   if (navigator.onLine && import.meta.env.VITE_FIREBASE_API_KEY && import.meta.env.VITE_FIREBASE_API_KEY !== 'demo-api-key') {
     try {
       const userCred = await signInWithEmailAndPassword(auth, cleanEmail, password)
+      const customTeacherName = localStorage.getItem('automatarium_teacher_custom_name')
       const profile: UserProfile = {
         uid: userCred.user.uid,
         email: userCred.user.email || cleanEmail,
         role: 'teacher',
-        fullName: 'Prof. Mendoza Morales',
+        fullName: customTeacherName || userCred.user.displayName || (cleanEmail.includes('mendoza') ? 'Prof. Mendoza Morales' : 'Profesor Titular'),
         createdAt: Date.now()
       }
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(profile))
@@ -170,16 +171,60 @@ export const loginTeacher = async (
     throw new Error('La contraseña debe tener al menos 4 caracteres.')
   }
 
+  const customTeacherName = localStorage.getItem('automatarium_teacher_custom_name')
   const profile: UserProfile = {
     uid: 'prof_mendoza',
     email: cleanEmail,
     role: 'teacher',
-    fullName: cleanEmail.includes('mendoza') ? 'Prof. Mendoza Morales' : 'Profesor Titular',
+    fullName: customTeacherName || (cleanEmail.includes('mendoza') ? 'Prof. Mendoza Morales' : 'Profesor Titular'),
     createdAt: Date.now()
   }
 
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(profile))
   return profile
+}
+
+/**
+ * Actualizar nombre o perfil del profesor
+ */
+export const updateTeacherProfile = async (newFullName: string): Promise<UserProfile> => {
+  const current = getStoredSession()
+  const updated: UserProfile = current ? {
+    ...current,
+    fullName: newFullName.trim()
+  } : {
+    uid: 'prof_docente',
+    email: 'profesor@tec.edu.mx',
+    role: 'teacher',
+    fullName: newFullName.trim(),
+    createdAt: Date.now()
+  }
+  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated))
+  localStorage.setItem('automatarium_teacher_custom_name', newFullName.trim())
+  return updated
+}
+
+/**
+ * Directorio de Alumnos registrados con sus nombres y claves
+ */
+export const getStudentDirectory = (): Record<string, { fullName: string; password?: string; changed?: boolean }> => {
+  return getStoredStudentPasswords()
+}
+
+export const registerOrUpdateStudent = (controlNumber: string, fullName: string, tempPassword?: string) => {
+  const data = getStoredStudentPasswords()
+  data[controlNumber] = {
+    password: tempPassword || data[controlNumber]?.password || 'Tec#2026',
+    changed: data[controlNumber]?.changed ?? false,
+    fullName: fullName.trim()
+  }
+  saveStoredStudentPasswords(data)
+}
+
+export const removeStudentCompletely = (controlNumber: string) => {
+  const data = getStoredStudentPasswords()
+  delete data[controlNumber]
+  saveStoredStudentPasswords(data)
 }
 
 /**
