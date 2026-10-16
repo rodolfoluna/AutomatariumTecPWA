@@ -12,6 +12,7 @@ import { GraphCanvas } from '../canvas/GraphCanvas'
 import { AutomataGraph } from '../../types/automata'
 import { runAFDTestSuite } from '../../simulation/afdSimulator'
 import { runLexerTestSuite } from '../../simulation/lexerSimulator'
+import { normalizeAutomataGraph } from '../../utils/diagramMerge'
 import { getStudentDirectory, registerOrUpdateStudent, removeStudentCompletely, resetStudentPasswordByTeacher } from '../../services/authService'
 import { 
   Users, 
@@ -1791,43 +1792,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               const exercises = reviewAct?.exercises || []
               const currentEx = exercises[reviewExerciseIndex] || exercises[0]
               const subEx = currentEx ? reviewingSubmission.exerciseSubmissions?.[currentEx.id] : undefined
-              let graph: AutomataGraph | undefined = subEx?.graph
-              if (!graph) {
-                const rawDiagram = (subEx as any)?.diagram || (subEx as any)?.diagramData || (reviewingSubmission as any)?.diagramData || (reviewingSubmission as any)?.diagram
-                if (rawDiagram) {
-                  try {
-                    graph = typeof rawDiagram === 'string' ? JSON.parse(rawDiagram) : rawDiagram
-                  } catch (e) {
-                    console.warn('Error parsing diagram:', e)
-                  }
-                }
-              }
+              const candidateRaw = subEx?.graph || 
+                                   (subEx as any)?.diagram || 
+                                   (subEx as any)?.diagramData || 
+                                   (reviewingSubmission as any)?.diagramData || 
+                                   (reviewingSubmission as any)?.diagram ||
+                                   (reviewingSubmission.exerciseSubmissions ? (Object.values(reviewingSubmission.exerciseSubmissions)[reviewExerciseIndex] as any)?.graph || (Object.values(reviewingSubmission.exerciseSubmissions)[reviewExerciseIndex] as any)?.diagram : undefined)
 
-              if (!graph && reviewingSubmission.exerciseSubmissions) {
-                const allValues = Object.values(reviewingSubmission.exerciseSubmissions)
-                const candidate = allValues[reviewExerciseIndex] || allValues[0]
-                if (candidate) {
-                  if (candidate.graph) {
-                    graph = candidate.graph
-                  } else {
-                    const raw = (candidate as any).diagram || (candidate as any).diagramData
-                    if (raw) {
-                      try {
-                        graph = typeof raw === 'string' ? JSON.parse(raw) : raw
-                      } catch {}
-                    }
-                  }
-                }
-              }
-
-              if (!graph) {
-                graph = {
-                  projectType: currentEx?.type === 'LEXER_DIAGRAM' ? 'LEXER_DIAGRAM' : 'AFD',
-                  states: [],
-                  transitions: [],
-                  initialState: null
-                }
-              }
+              const graph = normalizeAutomataGraph(candidateRaw, currentEx?.type === 'LEXER_DIAGRAM' ? 'LEXER_DIAGRAM' : 'AFD')
 
               // Evaluar test suite en vivo
               const afdResults = currentEx?.type === 'AFD'

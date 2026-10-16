@@ -28,7 +28,7 @@ import {
   subscribeToSubmissionDoc
 } from '../../services/academicFirestoreService'
 import { ConflictModal } from './ConflictModal'
-import { areGraphsEqual, mergeAutomataGraphs } from '../../utils/diagramMerge'
+import { areGraphsEqual, mergeAutomataGraphs, normalizeAutomataGraph } from '../../utils/diagramMerge'
 import { 
   Lock, 
   Save, 
@@ -183,17 +183,14 @@ export const StudentView: React.FC<StudentViewProps> = ({
       try {
         const cloudSub = await fetchSubmissionDoc(submissionId)
         if (cloudSub) {
-          let cloudGraph: AutomataGraph | undefined = cloudSub.exerciseSubmissions?.[currentExercise.id]?.graph
-          if (!cloudGraph) {
-            const rawDiagram = (cloudSub.exerciseSubmissions?.[currentExercise.id] as any)?.diagram ||
+          const rawCandidate = cloudSub.exerciseSubmissions?.[currentExercise.id]?.graph ||
+                               (cloudSub.exerciseSubmissions?.[currentExercise.id] as any)?.diagram ||
                                (cloudSub.exerciseSubmissions?.[currentExercise.id] as any)?.diagramData ||
-                               (cloudSub as any)?.diagramData || (cloudSub as any)?.diagram
-            if (rawDiagram) {
-              try {
-                cloudGraph = typeof rawDiagram === 'string' ? JSON.parse(rawDiagram) : rawDiagram
-              } catch {}
-            }
-          }
+                               (cloudSub as any)?.diagramData || 
+                               (cloudSub as any)?.diagram ||
+                               (cloudSub.exerciseSubmissions ? (Object.values(cloudSub.exerciseSubmissions)[selectedExerciseIndex] as any)?.graph || (Object.values(cloudSub.exerciseSubmissions)[selectedExerciseIndex] as any)?.diagram : undefined)
+
+          const cloudGraph = normalizeAutomataGraph(rawCandidate, currentExercise.type === 'LEXER_DIAGRAM' ? 'LEXER_DIAGRAM' : 'AFD')
 
           if (cloudGraph && cloudGraph.states && cloudGraph.states.length > 0) {
             const localHasStates = existingDraft?.graph?.states && existingDraft.graph.states.length > 0
@@ -245,13 +242,10 @@ export const StudentView: React.FC<StudentViewProps> = ({
 
       const editorCtrl = cloudSub.lastEditedBy?.controlNumber
       if (editorCtrl && editorCtrl !== studentControlNumber) {
-        let remoteGraph = cloudSub.exerciseSubmissions[currentExercise.id].graph
-        if (!remoteGraph) {
-          const raw = (cloudSub.exerciseSubmissions[currentExercise.id] as any).diagram
-          if (raw) {
-            try { remoteGraph = JSON.parse(raw) } catch {}
-          }
-        }
+        const rawRemote = cloudSub.exerciseSubmissions[currentExercise.id].graph ||
+                          (cloudSub.exerciseSubmissions[currentExercise.id] as any).diagram ||
+                          (cloudSub.exerciseSubmissions[currentExercise.id] as any).diagramData
+        const remoteGraph = normalizeAutomataGraph(rawRemote, currentExercise.type === 'LEXER_DIAGRAM' ? 'LEXER_DIAGRAM' : 'AFD')
 
         if (remoteGraph && !areGraphsEqual(currentGraph, remoteGraph)) {
           // Si el alumno no ha realizado modificaciones locales respecto al borrador guardado, se sincroniza automáticamente

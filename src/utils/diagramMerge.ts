@@ -138,3 +138,80 @@ export const mergeAutomataGraphs = (local: AutomataGraph, remote: AutomataGraph)
     initialState
   }
 }
+
+/**
+ * Normaliza cualquier formato de autómata (claves numéricas o string, isAccept o isFinal, label o read)
+ * al estándar exacto de AutomataGraph que esperan GraphCanvas y los simuladores.
+ */
+export const normalizeAutomataGraph = (raw: any, defaultType: 'AFD' | 'LEXER_DIAGRAM' = 'AFD'): AutomataGraph => {
+  if (!raw) {
+    return {
+      projectType: defaultType,
+      states: [],
+      transitions: [],
+      initialState: null
+    }
+  }
+
+  let parsed = raw
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return { projectType: defaultType, states: [], transitions: [], initialState: null }
+    }
+  }
+
+  const rawStates: any[] = Array.isArray(parsed?.states) ? parsed.states : []
+  const rawTransitions: any[] = Array.isArray(parsed?.transitions) ? parsed.transitions : []
+
+  const stateIdMap = new Map<any, number>()
+  const states: AutomataState[] = rawStates.map((s, idx) => {
+    const numericId = typeof s.id === 'number' ? s.id : idx
+    stateIdMap.set(s.id, numericId)
+    if (s.name) stateIdMap.set(s.name, numericId)
+
+    return {
+      id: numericId,
+      name: s.name || `q${idx}`,
+      x: typeof s.x === 'number' ? s.x : 140 + idx * 120,
+      y: typeof s.y === 'number' ? s.y : 160,
+      isFinal: s.isFinal === true || s.isAccept === true,
+      token: s.token || (s.isAccept || s.isFinal ? 'TOKEN_ID' : undefined),
+      retract: !!s.retract
+    }
+  })
+
+  let initialState: number | null = null
+  if (parsed.initialState !== undefined && parsed.initialState !== null) {
+    initialState = stateIdMap.get(parsed.initialState) ?? (typeof parsed.initialState === 'number' ? parsed.initialState : null)
+  }
+  if (initialState === null && states.length > 0) {
+    const foundInit = rawStates.find((s: any) => s.isInitial)
+    if (foundInit) {
+      initialState = stateIdMap.get(foundInit.id) ?? 0
+    } else {
+      initialState = states[0].id
+    }
+  }
+
+  const transitions: AutomataTransition[] = rawTransitions.map((t, idx) => {
+    const fromId = stateIdMap.get(t.from) ?? (typeof t.from === 'number' ? t.from : 0)
+    const toId = stateIdMap.get(t.to) ?? (typeof t.to === 'number' ? t.to : 0)
+    const read = t.read || t.label || t.symbol || '0'
+    return {
+      id: typeof t.id === 'number' ? t.id : idx + 1,
+      from: fromId,
+      to: toId,
+      read
+    }
+  })
+
+  return {
+    projectType: parsed.projectType || defaultType,
+    states,
+    transitions,
+    initialState
+  }
+}
+
