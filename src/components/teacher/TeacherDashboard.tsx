@@ -11,7 +11,7 @@ import { StudentGroup, StudentEnrollment, Activity, Exercise, ActivitySubmission
 import { GraphCanvas } from '../canvas/GraphCanvas'
 import { runAFDTestSuite } from '../../simulation/afdSimulator'
 import { runLexerTestSuite } from '../../simulation/lexerSimulator'
-import { getStudentDirectory, registerOrUpdateStudent } from '../../services/authService'
+import { getStudentDirectory, registerOrUpdateStudent, removeStudentCompletely } from '../../services/authService'
 import { 
   Users, 
   FileText, 
@@ -67,6 +67,31 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   // Directorio de alumnos para consultar nombres por número de control
   const [studentDirectory, setStudentDirectory] = useState<Record<string, { fullName: string }>>(() => getStudentDirectory())
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(groups[0]?.id || null)
+
+  // Diálogo modal de confirmación in-app (nunca bloqueado por el navegador ni la PWA)
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    confirmText: string
+    onConfirm: () => void
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: 'Eliminar',
+    onConfirm: () => {}
+  })
+
+  const triggerConfirm = (title: string, message: string, onConfirm: () => void, confirmText = 'Eliminar') => {
+    setConfirmDialog({
+      isOpen: true,
+      title,
+      message,
+      confirmText,
+      onConfirm
+    })
+  }
 
   // Grupos
   const [isCreatingGroup, setIsCreatingGroup] = useState(false)
@@ -364,23 +389,36 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   }
 
   const handleDeleteGroupConfirm = (groupId: string, groupName: string) => {
-    if (window.confirm(`¿Estás seguro de que deseas eliminar el grupo "${groupName}"? Esta acción no se puede deshacer.`)) {
-      if (onDeleteGroup) {
-        onDeleteGroup(groupId)
-      }
-      if (selectedGroupId === groupId) {
-        const remaining = groups.filter(g => g.id !== groupId)
-        setSelectedGroupId(remaining[0]?.id || '')
-      }
-    }
+    triggerConfirm(
+      '¿Eliminar Grupo?',
+      `¿Estás seguro de que deseas eliminar permanentemente el grupo "${groupName}"?`,
+      () => {
+        if (onDeleteGroup) {
+          onDeleteGroup(groupId)
+        }
+        if (selectedGroupId === groupId) {
+          const remaining = groups.filter(g => g.id !== groupId)
+          setSelectedGroupId(remaining[0]?.id || '')
+        }
+      },
+      'Sí, Eliminar Grupo'
+    )
   }
 
   const handleRemoveStudentConfirm = (groupId: string, controlNumber: string, studentName: string) => {
-    if (window.confirm(`¿Estás seguro de quitar al alumno "${studentName}" (${controlNumber}) de este grupo?`)) {
-      if (onRemoveStudentFromGroup) {
-        onRemoveStudentFromGroup(groupId, controlNumber)
-      }
-    }
+    triggerConfirm(
+      '¿Quitar Alumno del Grupo?',
+      `¿Estás seguro de quitar al alumno "${studentName}" (${controlNumber}) de este grupo?`,
+      () => {
+        if (onRemoveStudentFromGroup) {
+          onRemoveStudentFromGroup(groupId, controlNumber)
+        }
+        removeStudentCompletely(controlNumber)
+        setStudentDirectory(getStudentDirectory())
+        setGeneratedCredentials(prev => prev.filter(c => c.controlNumber !== controlNumber))
+      },
+      'Sí, Quitar Alumno'
+    )
   }
 
   const activeEditingExercise = formExercises.find(e => e.id === editingExerciseId)
@@ -501,9 +539,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       className="btn btn-secondary btn-sm"
                       style={{ color: '#F87171' }}
                       onClick={() => {
-                        if (confirm(`¿Seguro que deseas eliminar la actividad "${act.title}"?`)) {
-                          onDeleteActivity(act.id)
-                        }
+                        triggerConfirm(
+                          '¿Eliminar Actividad?',
+                          `¿Estás seguro de que deseas eliminar la actividad "${act.title}"?`,
+                          () => onDeleteActivity(act.id),
+                          'Sí, Eliminar Actividad'
+                        )
                       }}
                       title="Eliminar actividad"
                     >
@@ -1590,6 +1631,47 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* DIÁLOGO MODAL DE CONFIRMACIÓN IN-APP (NUNCA BLOQUEADO POR EL NAVEGADOR) */}
+      {confirmDialog.isOpen && (
+        <div className="modal-overlay" style={{ zIndex: 1200 }} onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}>
+          <div className="modal-content" style={{ maxWidth: 440, border: '1px solid rgba(248, 113, 113, 0.4)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <div style={{ padding: 8, background: 'rgba(239, 68, 68, 0.15)', borderRadius: '50%', color: '#F87171', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Trash2 size={20} />
+              </div>
+              <h3 style={{ fontSize: '1.15rem', fontFamily: 'var(--font-header)', margin: 0, color: 'var(--white)' }}>
+                {confirmDialog.title}
+              </h3>
+            </div>
+
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 20 }}>
+              {confirmDialog.message}
+            </p>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ background: '#DC2626', borderColor: '#DC2626', color: '#fff' }}
+                onClick={() => {
+                  confirmDialog.onConfirm()
+                  setConfirmDialog(prev => ({ ...prev, isOpen: false }))
+                }}
+              >
+                {confirmDialog.confirmText}
+              </button>
+            </div>
           </div>
         </div>
       )}

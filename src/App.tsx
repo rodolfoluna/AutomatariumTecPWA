@@ -209,7 +209,19 @@ export const App: React.FC = () => {
     localStorage.setItem('automatarium_tec_groups', JSON.stringify(groups))
   }, [groups])
 
-  const [activities, setActivities] = useState<Activity[]>(INITIAL_ACTIVITIES)
+  // Actividades (persistidas en localStorage)
+  const [activities, setActivities] = useState<Activity[]>(() => {
+    try {
+      const saved = localStorage.getItem('automatarium_tec_activities')
+      if (saved) return JSON.parse(saved)
+    } catch {}
+    return INITIAL_ACTIVITIES
+  })
+
+  React.useEffect(() => {
+    localStorage.setItem('automatarium_tec_activities', JSON.stringify(activities))
+  }, [activities])
+
   const [submissions, setSubmissions] = useState<ActivitySubmission[]>(INITIAL_SUBMISSIONS)
 
   const handleLoginSuccess = (user: UserProfile) => {
