@@ -64,10 +64,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   const handleCanvasClick = (e: React.MouseEvent) => {
     if (readOnly) return
 
-    // Solo procesar si el clic fue directamente en el fondo del lienzo o en el SVG
+    // Ignorar clics en la barra de herramientas
     const target = e.target as HTMLElement | SVGElement
-    const isBackground = target === svgRef.current || target.id === 'automatarium-graph'
-    if (!isBackground) return
+    if (target.closest('button') || target.closest('.tool-btn')) return
 
     if (selectedTool === 'state') {
       const svgRect = svgRef.current?.getBoundingClientRect()
@@ -378,6 +377,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
         {/* SVG Drawing Canvas */}
         <svg
+          id="automatarium-graph"
           ref={svgRef}
           style={{ width: '100%', height: '100%', userSelect: 'none' }}
         >
